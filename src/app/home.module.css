@@ -1,0 +1,59 @@
+.page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem 1.25rem;
+  animation: rise 700ms ease both;
+}
+
+.panel {
+  width: min(40rem, 100%);
+  padding: 2rem 1.6rem;
+  border-radius: 1.4rem;
+  background: rgba(255, 252, 247, 0.78);
+  border: 1px solid rgba(28, 36, 32, 0.1);
+  box-shadow: 0 22px 50px rgba(28, 36, 32, 0.1);
+  backdrop-filter: blur(12px);
+}
+
+.eyebrow {
+  margin: 0 0 0.8rem;
+  color: #5c6b63;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+}
+
+.panel h1 {
+  margin: 0 0 0.9rem;
+  font-family: var(--font-display), Georgia, serif;
+  font-size: clamp(2.2rem, 6vw, 3.4rem);
+  line-height: 0.98;
+  letter-spacing: -0.04em;
+}
+
+.panel p {
+  margin: 0 0 1rem;
+  color: #5c6b63;
+  line-height: 1.55;
+}
+
+.panel code {
+  font-size: 0.92em;
+  color: #1c2420;
+}
+
+.example {
+  margin-top: 1.4rem !important;
+}
+
+.example a {
+  color: #2f5d50;
+  font-weight: 560;
+}
+
+@media (min-width: 860px) {
+  .panel {
+    padding: 2.5rem 2.2rem;
+  }
+}

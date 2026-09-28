@@ -1,0 +1,74 @@
+# Architecture
+
+Studio Shots turns catalog shot ideas into reviewer-approved lifestyle images without a separate dashboard.
+
+## High-level flow
+
+```text
+CSV (/import in Telegram)
+  → plan + cost preview (Neon)
+  → confirm one product
+  → claim request (imported_unconfirmed → generating)
+  → Luma image_ref × 3 (concurrent) @ 3:2
+  → download → Vercel Blob
+  → Telegram photos + Approve/Reject
+  → ≥2 approvals → approved + product page URL
+  → /products/[sku] shows approved Blob images only
+  → /status for campaign rollup + estimated spend
+```
+
+## Components
+
+| Piece | Role |
+|---|---|
+| `POST /api/telegram/webhook` | Authenticated Telegram updates (`x-telegram-bot-api-secret-token`); chat allowlist |
+| `src/lib/imports.ts` | Idempotent CSV plan persistence (Telegram `update_id`, stable IDs, Neon transaction) |
+| `src/lib/generation.ts` | Atomic claim, Luma pipeline via `waitUntil`, review resolution |
+| `src/lib/luma.ts` | `image_ref` + `uni-1` + aspect `3:2` |
+| `src/lib/blob.ts` | Durable public Blob URLs before chat delivery |
+| `src/lib/products.ts` | Product page query; approved-only filter |
+| `src/lib/status.ts` | Campaign aggregates for `/status` |
+| `src/lib/assets.ts` | Join root-relative `/demo/...` paths to `APP_URL` for external APIs |
+
+## Import safety
+
+- Parent `imports` row is written with dependent products/shot requests in one Neon HTTP transaction batch.
+- Duplicate Telegram deliveries of the same `update_id` do not create duplicate imports.
+- Shot requests are keyed by `(sku, request_hash)` so identical re-imports stay idempotent.
+- “Unchanged” catalog rows can still be **actionable** if their workflow status is `imported_unconfirmed`.
+
+## Generation safety
+
+- A request is claimed atomically before any paid Luma call.
+- Work continues after the webhook returns `200` (`waitUntil`, `maxDuration` on the route).
+- Candidate images are stored on Blob; Telegram receives Blob URLs (not short-lived Luma URLs).
+- One product is generated per confirm action in v1.
+
+## Review rules
+
+- Each ready candidate is reviewed independently (Approve / Reject).
+- After every ready candidate has a decision: **approved** if ≥2 approvals, else **needs_regeneration**.
+- Failed candidates are excluded from the approval count but reported in chat.
+- Completing as approved sends the public product page URL built from `APP_URL`.
+
+## Public site
+
+- `/` — product intro and temporary demo link to SS-001 (campaign overview page comes next).
+- `/products/[sku]` — metadata, original catalog photo, approved styled shots + downloads.
+- Unknown SKUs → not-found; products with no approvals → empty gallery state.
+
+## Cost model (estimate)
+
+Configured as integer micros USD per `image_ref` image (`IMAGE_REF_COST_USD_MICROS`, currently $0.0434). Preview and `/status` use that constant × candidates generated. Treat it as an estimate and update when provider pricing changes.
+
+## Near-term product work
+
+Documented here so the README stays honest about the sample CSV:
+
+1. **Explicit `Priority` column** — sample CSV already includes it; replace note-keyword ranking with this field.
+2. **SKU picker** — after import, choose any actionable SKU (paginated inline buttons), plus keep “highest priority first.”
+3. **Campaign homepage** — live counts and approved product list on `/`.
+
+## Out of scope (v1)
+
+Bulk generate-all, multi-tenant / multi-chat, CMS publishing, `/export` zip, automatic regeneration queues.

@@ -1,0 +1,351 @@
+{
+  "id": "1297eb26-e660-402b-a597-66435b3e137f",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.imports": {
+      "name": "imports",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "filename": {
+          "name": "filename",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total_catalog_rows": {
+          "name": "total_catalog_rows",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rows_with_shot_idea": {
+          "name": "rows_with_shot_idea",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "new_requests": {
+          "name": "new_requests",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "changed_requests": {
+          "name": "changed_requests",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "unchanged_existing_requests": {
+          "name": "unchanged_existing_requests",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "planned_generations": {
+          "name": "planned_generations",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "additional_estimated_cost_micros_usd": {
+          "name": "additional_estimated_cost_micros_usd",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "warnings": {
+          "name": "warnings",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "priority_request_sku": {
+          "name": "priority_request_sku",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "telegram_chat_id": {
+          "name": "telegram_chat_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "telegram_preview_message_id": {
+          "name": "telegram_preview_message_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "confirmation_action": {
+          "name": "confirmation_action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "confirmed_at": {
+          "name": "confirmed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "imports_preview_message_idx": {
+          "name": "imports_preview_message_idx",
+          "columns": [
+            {
+              "expression": "telegram_chat_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "telegram_preview_message_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.products": {
+      "name": "products",
+      "schema": "",
+      "columns": {
+        "sku": {
+          "name": "sku",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "product_name": {
+          "name": "product_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category": {
+          "name": "category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "color_or_finish": {
+          "name": "color_or_finish",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "material": {
+          "name": "material",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "price_cents": {
+          "name": "price_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "photo_url": {
+          "name": "photo_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.shot_requests": {
+      "name": "shot_requests",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "product_sku": {
+          "name": "product_sku",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "import_id": {
+          "name": "import_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "supersedes_request_id": {
+          "name": "supersedes_request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "shot_idea": {
+          "name": "shot_idea",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "notes_snapshot": {
+          "name": "notes_snapshot",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "request_hash": {
+          "name": "request_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "workflow_status": {
+          "name": "workflow_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "approved_count": {
+          "name": "approved_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "shot_requests_sku_hash_idx": {
+          "name": "shot_requests_sku_hash_idx",
+          "columns": [
+            {
+              "expression": "product_sku",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "request_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "shot_requests_product_sku_products_sku_fk": {
+          "name": "shot_requests_product_sku_products_sku_fk",
+          "tableFrom": "shot_requests",
+          "tableTo": "products",
+          "columnsFrom": [
+            "product_sku"
+          ],
+          "columnsTo": [
+            "sku"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "shot_requests_import_id_imports_id_fk": {
+          "name": "shot_requests_import_id_imports_id_fk",
+          "tableFrom": "shot_requests",
+          "tableTo": "imports",
+          "columnsFrom": [
+            "import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
