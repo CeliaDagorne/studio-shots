@@ -1,5 +1,7 @@
 # Studio Shots
 
+**Live site:** [https://studio-shots.vercel.app](https://studio-shots.vercel.app)
+
 Telegram-first styled product photography for catalog teams.
 
 Import a product CSV, generate lifestyle candidates with [Luma](https://lumalabs.ai) (one product at a time), approve or reject each shot in chat, and publish approved images on public product pages. Campaign managers track progress and estimated spend with `/status`.
