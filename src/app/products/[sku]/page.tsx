@@ -9,10 +9,11 @@ import styles from "./product.module.css";
 export const dynamic = "force-dynamic";
 
 type PageProps = {
-  params: { sku: string };
+  params: Promise<{ sku: string }>;
 };
 
-export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+export async function generateMetadata(props: PageProps): Promise<Metadata> {
+  const params = await props.params;
   const data = await getProductPageData(params.sku);
   if (!data) {
     return { title: "Product not found · Studio Shots" };
@@ -23,7 +24,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   };
 }
 
-export default async function ProductPage({ params }: PageProps) {
+export default async function ProductPage(props: PageProps) {
+  const params = await props.params;
   const data = await getProductPageData(params.sku);
   if (!data) {
     notFound();

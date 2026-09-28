@@ -17,3 +17,5 @@ session-packages/
 .gcloud/
 google-cloud-sdk/
 google-cloud-cli-*.tar.gz
+# next-agents-md
+.next-docs/

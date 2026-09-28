@@ -45,7 +45,7 @@ Photo paths are root-relative (`/demo/...`) and resolved against `APP_URL` when 
 
 ## Stack
 
-- Next.js 14 (App Router) on Vercel
+- Next.js 16 (App Router) on Vercel
 - Neon (Postgres) + Drizzle
 - Telegram Bot API (webhook)
 - Luma Agents API
