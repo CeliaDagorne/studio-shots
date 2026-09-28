@@ -24,6 +24,8 @@ export type TelegramUpdate = {
   callback_query?: TelegramCallbackQuery;
 };
 
+export type CatalogPriority = "high" | "normal" | "low";
+
 export type CatalogRow = {
   sku: string;
   productName: string;
@@ -34,6 +36,7 @@ export type CatalogRow = {
   photoUrl: string;
   shotIdea: string | null;
   notes: string | null;
+  priority: CatalogPriority;
 };
 
 export type CatalogWarning = {
@@ -53,6 +56,7 @@ export type RequestPlanSummary = {
   additionalEstimatedCostMicrosUsd: number;
   warnings: CatalogWarning[];
   priorityRequestSku: string | null;
+  priorityRequestPriority: CatalogPriority | null;
   importId: string;
 };
 

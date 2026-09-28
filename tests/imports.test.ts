@@ -13,7 +13,7 @@ test("parseCatalogCsv handles quoted commas in Shot Idea", () => {
   const rows = parseCatalogCsv(
     [
       "SKU,Product Name,Category,Color / Finish,Material,Price,Photo,Shot Idea,Notes,Priority",
-      'SS-001,Lilac Ceramic Vase,Ceramics,Lilac,Stoneware,$48,/demo/ss-001-lilac-vase.png,"sunlit console table by a window, single stem of dried grasses, soft morning light","Hero SKU for demos",100',
+      'SS-001,Lilac Ceramic Vase,Ceramics,Lilac,Stoneware,$48,/demo/ss-001-lilac-vase.png,"sunlit console table by a window, single stem of dried grasses, soft morning light","Hero SKU for demos",high',
     ].join("\n"),
   );
 
@@ -27,6 +27,7 @@ test("parseCatalogCsv handles quoted commas in Shot Idea", () => {
   assert.equal(rows[0]?.notes, "Hero SKU for demos");
   assert.equal(rows[0]?.photoUrl, "/demo/ss-001-lilac-vase.png");
   assert.equal(rows[0]?.priceCents, 4800);
+  assert.equal(rows[0]?.priority, "high");
 });
 
 test("classifyRequestChange is idempotent for identical shot request content", () => {
@@ -40,6 +41,7 @@ test("classifyRequestChange is idempotent for identical shot request content", (
     photoUrl: "/demo/ss-001-lilac-vase.png",
     shotIdea: "sunlit console table by a window, single stem of dried grasses, soft morning light",
     notes: "Hero SKU for demos",
+    priority: "high" as const,
   };
 
   const requestHash = computeRequestHash(row);
@@ -57,6 +59,7 @@ test("classifyRequestChange treats changed shot idea as actionable change", () =
     photoUrl: "/demo/ss-001-lilac-vase.png",
     shotIdea: "sunlit console table by a window, single stem of dried grasses, soft morning light",
     notes: "Hero SKU for demos",
+    priority: "high" as const,
   };
 
   const newRow = { ...oldRow, shotIdea: "mantel shelf with soft afternoon light" };

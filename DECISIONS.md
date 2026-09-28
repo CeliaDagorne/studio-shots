@@ -28,11 +28,11 @@ Product and engineering choices behind Studio Shots.
 
 ## Priority is an explicit catalog field
 
-**Decision:** Urgency comes from a CSV `Priority` integer (higher = more urgent), not free-text Notes heuristics.
+**Decision:** Urgency comes from a required CSV `Priority` value: `high`, `normal`, or `low` (case-insensitive).
 
 **Why:** Keyword scoring on Notes is brittle and opaque. Operators should set priority in the sheet they already edit.
 
-**Impact:** Sample `data/catalog.csv` includes `Priority`. Application ranking will use that column (replacing note-keyword scoring) as the next wiring step.
+**Impact:** Missing or invalid Priority fails the import with a clear error. Among actionable requests, selection is `high` > `normal` > `low`, with CSV order breaking ties. Import preview shows the chosen SKU and its priority level. Notes never influence ranking.
 
 ## Durable storage before chat
 

@@ -57,6 +57,7 @@ test("importPreviewKeyboard shows priority and cancel actions", () => {
     existingPendingRequests: 16,
     warnings: [],
     priorityRequestSku: "SS-001",
+    priorityRequestPriority: "high",
   });
   const keyboard = importPreviewKeyboard(summary.importId, summary);
   assert.ok(keyboard);

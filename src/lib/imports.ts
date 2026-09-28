@@ -5,13 +5,13 @@ import { getDb, getNeonSql } from "@/lib/db";
 import { collectCatalogWarnings } from "@/lib/csv";
 import {
   classifyRequestChange,
-  computePriorityScore,
+  catalogPriorityRank,
   computeRequestHash,
   isActionableWorkflowStatus,
   requestPlanFromCounts,
 } from "@/lib/request-planning";
 import { generationCandidates, imports, products, shotRequests } from "@/lib/schema";
-import type { CatalogRow, CatalogWarning, ImportResult, RequestPlanSummary } from "@/types";
+import type { CatalogPriority, CatalogRow, CatalogWarning, ImportResult, RequestPlanSummary } from "@/types";
 
 const now = () => new Date();
 
@@ -125,7 +125,17 @@ export const buildImportPlan = async (
   let unchangedExistingRequests = 0;
   let existingPendingRequests = 0;
   let prioritySku: string | null = null;
-  let priorityScore = 0;
+  let priorityLevel: CatalogPriority | null = null;
+  let bestPriorityRank = 0;
+
+  const considerPriority = (row: CatalogRow) => {
+    const rank = catalogPriorityRank(row.priority);
+    if (rank > bestPriorityRank) {
+      bestPriorityRank = rank;
+      prioritySku = row.sku;
+      priorityLevel = row.priority;
+    }
+  };
 
   for (const row of rows) {
     const existingProduct = productBySku.get(row.sku);
@@ -169,20 +179,12 @@ export const buildImportPlan = async (
       const matchingRequest = priorRequests.find((request) => request.requestHash === requestHash);
       if (matchingRequest && isActionableWorkflowStatus(matchingRequest.workflowStatus)) {
         existingPendingRequests += 1;
-        const score = computePriorityScore(row);
-        if (score > priorityScore) {
-          priorityScore = score;
-          prioritySku = row.sku;
-        }
+        considerPriority(row);
       }
       continue;
     }
 
-    const score = computePriorityScore(row);
-    if (score > priorityScore) {
-      priorityScore = score;
-      prioritySku = row.sku;
-    }
+    considerPriority(row);
 
     const latestRequest = priorRequests[0];
     const requestHash = computeRequestHash(row);
@@ -220,7 +222,8 @@ export const buildImportPlan = async (
     unchangedExistingRequests,
     existingPendingRequests,
     warnings,
-    priorityRequestSku: priorityScore > 0 ? prioritySku : null,
+    priorityRequestSku: prioritySku,
+    priorityRequestPriority: priorityLevel,
   });
 
   return {
@@ -497,6 +500,7 @@ export const importRecordToSummary = (
   additionalEstimatedCostMicrosUsd: record.additionalEstimatedCostMicrosUsd,
   warnings: record.warnings as CatalogWarning[],
   priorityRequestSku: record.priorityRequestSku,
+  priorityRequestPriority: null,
 });
 
 /** Test helper: remove rows created by integration tests. */

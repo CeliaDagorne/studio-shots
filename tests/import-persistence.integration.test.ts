@@ -43,6 +43,7 @@ const makeSampleRow = (sku: string) => ({
   photoUrl: `https://example.com/${sku.toLowerCase()}.jpg`,
   shotIdea: "morning kitchen counter, steam, warm light",
   notes: "integration test",
+  priority: "normal" as const,
 });
 
 const uniqueSku = (prefix: string) =>
@@ -243,7 +244,8 @@ test("unchanged unconfirmed requests remain actionable without duplication", { s
   const sampleRow = makeSampleRow(testSku);
   const priorityRow = {
     ...sampleRow,
-    notes: "Hero SKU for demos",
+    priority: "high" as const,
+    notes: "notes must not affect ranking",
   };
 
   const telegramUpdateId = 9_500_000_000 + Math.floor(Math.random() * 1_000_000);

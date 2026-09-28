@@ -63,11 +63,8 @@ Configured as integer micros USD per `image_ref` image (`IMAGE_REF_COST_USD_MICR
 
 ## Near-term product work
 
-Documented here so the README stays honest about the sample CSV:
-
-1. **Explicit `Priority` column** — sample CSV already includes it; replace note-keyword ranking with this field.
-2. **SKU picker** — after import, choose any actionable SKU (paginated inline buttons), plus keep “highest priority first.”
-3. **Campaign homepage** — live counts and approved product list on `/`.
+1. **SKU picker** — after import, choose any actionable SKU (paginated inline buttons), plus keep “highest priority first.”
+2. **Campaign homepage** — live counts and approved product list on `/`.
 
 ## Out of scope (v1)
 

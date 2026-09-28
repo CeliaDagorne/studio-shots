@@ -1,6 +1,6 @@
 import { parse } from "csv-parse/sync";
 
-import type { CatalogRow, CatalogWarning } from "@/types";
+import type { CatalogPriority, CatalogRow, CatalogWarning } from "@/types";
 
 const REQUIRED_HEADERS = [
   "SKU",
@@ -12,6 +12,7 @@ const REQUIRED_HEADERS = [
   "Photo",
   "Shot Idea",
   "Notes",
+  "Priority",
 ] as const;
 
 type RawCatalogRecord = Record<(typeof REQUIRED_HEADERS)[number], string>;
@@ -32,6 +33,25 @@ const parsePriceCents = (value: string): number => {
   return Number.parseInt(whole, 10) * 100 + Number.parseInt(fractionPadded, 10);
 };
 
+export const parseCatalogPriority = (
+  raw: string | undefined,
+  sku: string,
+): CatalogPriority => {
+  const trimmed = (raw ?? "").trim();
+  if (!trimmed) {
+    throw new Error(`Missing Priority for SKU ${sku}. Expected high, normal, or low.`);
+  }
+
+  const normalized = trimmed.toLowerCase();
+  if (normalized === "high" || normalized === "normal" || normalized === "low") {
+    return normalized;
+  }
+
+  throw new Error(
+    `Invalid Priority for SKU ${sku}: "${trimmed}". Expected high, normal, or low.`,
+  );
+};
+
 export const parseCatalogCsv = (contents: string): CatalogRow[] => {
   const records = parse(contents, {
     columns: true,
@@ -50,17 +70,21 @@ export const parseCatalogCsv = (contents: string): CatalogRow[] => {
     }
   }
 
-  return records.map((record) => ({
-    sku: record["SKU"].trim(),
-    productName: record["Product Name"].trim(),
-    category: record["Category"].trim(),
-    colorOrFinish: record["Color / Finish"].trim(),
-    material: record["Material"].trim(),
-    priceCents: parsePriceCents(record["Price"]),
-    photoUrl: record["Photo"].trim(),
-    shotIdea: normalizeOptional(record["Shot Idea"]),
-    notes: normalizeOptional(record["Notes"]),
-  }));
+  return records.map((record) => {
+    const sku = record["SKU"].trim();
+    return {
+      sku,
+      productName: record["Product Name"].trim(),
+      category: record["Category"].trim(),
+      colorOrFinish: record["Color / Finish"].trim(),
+      material: record["Material"].trim(),
+      priceCents: parsePriceCents(record["Price"]),
+      photoUrl: record["Photo"].trim(),
+      shotIdea: normalizeOptional(record["Shot Idea"]),
+      notes: normalizeOptional(record["Notes"]),
+      priority: parseCatalogPriority(record["Priority"], sku || "(missing SKU)"),
+    };
+  });
 };
 
 export const collectCatalogWarnings = (rows: CatalogRow[]): CatalogWarning[] => {

@@ -1,5 +1,5 @@
 SKU,Product Name,Category,Color / Finish,Material,Price,Photo,Shot Idea,Notes,Priority
-SS-001,Lilac Ceramic Vase,Ceramics,Lilac,Stoneware,$48,/demo/ss-001-lilac-vase.png,"sunlit console table by a window, single stem of dried grasses, soft morning light, quiet apartment vibe",Hero SKU for demos,100
-SS-002,Amber Glass Candle,Decor,Amber,Glass + soy wax,$32,/demo/ss-002-amber-candle.png,"evening coffee table, book half-open beside it, warm lamplight and a soft shadow falloff",,50
-SS-003,Olive Canvas Weekend Bag,Bags,Olive,Canvas + leather,$128,/demo/ss-003-olive-weekend-bag.png,"hotel lobby bench near a doorway, travel day energy, natural daylight from glass doors",,50
-SS-004,Cobalt Glass Table Lamp,Lighting,Cobalt,Glass + linen shade,$160,/demo/ss-004-cobalt-table-lamp.png,"bedside nightstand at dusk, lamp switched on, linen sheets and a quiet reading corner",,20
+SS-001,Lilac Ceramic Vase,Ceramics,Lilac,Stoneware,$48,/demo/ss-001-lilac-vase.png,"sunlit console table by a window, single stem of dried grasses, soft morning light, quiet apartment vibe",Hero SKU for demos,high
+SS-002,Amber Glass Candle,Decor,Amber,Glass + soy wax,$32,/demo/ss-002-amber-candle.png,"evening coffee table, book half-open beside it, warm lamplight and a soft shadow falloff",,normal
+SS-003,Olive Canvas Weekend Bag,Bags,Olive,Canvas + leather,$128,/demo/ss-003-olive-weekend-bag.png,"hotel lobby bench near a doorway, travel day energy, natural daylight from glass doors",,normal
+SS-004,Cobalt Glass Table Lamp,Lighting,Cobalt,Glass + linen shade,$160,/demo/ss-004-cobalt-table-lamp.png,"bedside nightstand at dusk, lamp switched on, linen sheets and a quiet reading corner",,low

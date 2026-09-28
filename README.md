@@ -26,10 +26,10 @@ Sample data lives in [`data/catalog.csv`](data/catalog.csv) with packshots under
 
 | SKU | Product | Priority |
 |---|---|---|
-| SS-001 | Lilac Ceramic Vase | 100 (high) |
-| SS-002 | Amber Glass Candle | 50 |
-| SS-003 | Olive Canvas Weekend Bag | 50 |
-| SS-004 | Cobalt Glass Table Lamp | 20 |
+| SS-001 | Lilac Ceramic Vase | high |
+| SS-002 | Amber Glass Candle | normal |
+| SS-003 | Olive Canvas Weekend Bag | normal |
+| SS-004 | Cobalt Glass Table Lamp | low |
 
 Photo paths are root-relative (`/demo/...`) and resolved against `APP_URL` when calling Luma.
 
@@ -38,7 +38,9 @@ Photo paths are root-relative (`/demo/...`) and resolved against `APP_URL` when 
 `SKU`, `Product Name`, `Category`, `Color / Finish`, `Material`, `Price`, `Photo`, `Shot Idea`, `Notes`, `Priority`
 
 - Rows without a Shot Idea are catalog-only (no generation request).
-- `Priority` is an integer; higher means more urgent. Wiring this column into ranking (and a Telegram SKU picker) is the next product step—see [ARCHITECTURE.md](ARCHITECTURE.md).
+- **`Priority` is required** on every row. Accepted values: `high`, `normal`, `low` (case-insensitive; whitespace trimmed).
+- Among actionable shot requests, Studio Shots selects the highest priority (`high` > `normal` > `low`). Equal priorities keep CSV order.
+- Notes never affect priority ranking.
 
 ## Stack
 

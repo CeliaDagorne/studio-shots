@@ -43,7 +43,8 @@ const sampleRow = {
   priceCents: 2800,
   photoUrl: "https://example.com/test-gen-001.jpg",
   shotIdea: "morning kitchen counter, steam, warm light",
-  notes: "Hero SKU for demos",
+  notes: "integration test",
+  priority: "high" as const,
 };
 
 test("atomic claim moves imported_unconfirmed to generating once", { skip: !integrationEnabled }, async (t) => {

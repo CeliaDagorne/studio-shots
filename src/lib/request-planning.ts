@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { CatalogRow, CatalogWarning, RequestPlanSummary } from "@/types";
+import type { CatalogPriority, CatalogRow, CatalogWarning, RequestPlanSummary } from "@/types";
 
 export const IMAGE_REF_COST_USD_MICROS = 43_400;
 export const MVP_ASPECT_RATIO = "3:2";
@@ -8,6 +8,12 @@ export const CANDIDATES_PER_REQUEST = 3;
 
 /** Workflow statuses that still need generation (not yet claimed, reviewed, or closed). */
 export const ACTIONABLE_WORKFLOW_STATUSES = new Set(["imported_unconfirmed"]);
+
+export const CATALOG_PRIORITY_RANK: Record<CatalogPriority, number> = {
+  high: 3,
+  normal: 2,
+  low: 1,
+};
 
 const normalizeForHash = (value: string | null) => (value ?? "").trim().toLowerCase();
 
@@ -43,15 +49,26 @@ export const classifyRequestChange = (
 export const isActionableWorkflowStatus = (status: string): boolean =>
   ACTIONABLE_WORKFLOW_STATUSES.has(status);
 
-export const computePriorityScore = (row: CatalogRow): number => {
-  const notes = row.notes?.toLowerCase() ?? "";
-  let score = 0;
-  if (notes.includes("do this one first")) score += 100;
-  if (notes.includes("bestseller")) score += 50;
-  if (notes.includes("top seller")) score += 40;
-  if (notes.includes("q4")) score += 30;
-  if (notes.includes("holiday")) score += 20;
-  return score;
+/** Rank for comparisons; higher wins. Notes must not affect this. */
+export const catalogPriorityRank = (priority: CatalogPriority): number =>
+  CATALOG_PRIORITY_RANK[priority];
+
+/**
+ * Pick the highest-priority candidate. Ties keep the first row in the given order
+ * (CSV order when callers pass rows as imported).
+ */
+export const selectHighestPrioritySku = (
+  candidates: Array<{ sku: string; priority: CatalogPriority }>,
+): { sku: string; priority: CatalogPriority } | null => {
+  let best: { sku: string; priority: CatalogPriority } | null = null;
+
+  for (const candidate of candidates) {
+    if (!best || catalogPriorityRank(candidate.priority) > catalogPriorityRank(best.priority)) {
+      best = candidate;
+    }
+  }
+
+  return best;
 };
 
 export const formatUsdMicros = (micros: number): string => {
@@ -65,6 +82,16 @@ export const IMPORT_UP_TO_DATE_MESSAGE =
 
 export const hasActionableGenerations = (summary: RequestPlanSummary): boolean =>
   summary.requestsReadyToGenerate > 0;
+
+export const formatPriorityRequestPreviewLine = (summary: RequestPlanSummary): string => {
+  if (!summary.priorityRequestSku) {
+    return "- Priority request: none detected";
+  }
+  const level = summary.priorityRequestPriority
+    ? ` (${summary.priorityRequestPriority})`
+    : "";
+  return `- Priority request: ${summary.priorityRequestSku}${level}`;
+};
 
 export const buildImportPreviewText = (summary: RequestPlanSummary): string => {
   const warningLines =
@@ -85,7 +112,7 @@ export const buildImportPreviewText = (summary: RequestPlanSummary): string => {
     `- Planned generations: ${summary.plannedGenerations}`,
     `- Additional estimated cost: ${formatUsdMicros(summary.additionalEstimatedCostMicrosUsd)}`,
     `- Aspect ratio: ${MVP_ASPECT_RATIO}`,
-    summary.priorityRequestSku ? `- Priority request: ${summary.priorityRequestSku}` : "- Priority request: none detected",
+    formatPriorityRequestPreviewLine(summary),
     "",
     "Catalog-level warnings:",
     ...warningLines,
@@ -107,6 +134,7 @@ export const requestPlanFromCounts = (params: {
   existingPendingRequests: number;
   warnings: CatalogWarning[];
   priorityRequestSku: string | null;
+  priorityRequestPriority: CatalogPriority | null;
   importId: string;
 }): RequestPlanSummary => {
   const requestsReadyToGenerate =

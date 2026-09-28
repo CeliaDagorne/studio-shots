@@ -20,6 +20,7 @@ const baseSummary = (overrides: Partial<RequestPlanSummary> = {}): RequestPlanSu
     existingPendingRequests: 0,
     warnings: [],
     priorityRequestSku: null,
+    priorityRequestPriority: null,
     ...overrides,
   });
 
@@ -34,6 +35,7 @@ test("importPreviewKeyboard includes generate actions for pending unchanged requ
   const summary = baseSummary({
     existingPendingRequests: 16,
     priorityRequestSku: "SS-001",
+    priorityRequestPriority: "high",
   });
   assert.equal(summary.requestsReadyToGenerate, 16);
   assert.equal(summary.plannedGenerations, 48);
@@ -51,7 +53,11 @@ test("buildImportPreviewText includes up-to-date message only when nothing is ac
   assert.match(idle, new RegExp(IMPORT_UP_TO_DATE_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
   const pending = buildImportPreviewText(
-    baseSummary({ existingPendingRequests: 16, priorityRequestSku: "SS-001" }),
+    baseSummary({
+      existingPendingRequests: 16,
+      priorityRequestSku: "SS-001",
+      priorityRequestPriority: "high",
+    }),
   );
   assert.doesNotMatch(
     pending,
@@ -61,7 +67,7 @@ test("buildImportPreviewText includes up-to-date message only when nothing is ac
   assert.match(pending, /Requests ready to generate: 16/);
   assert.match(pending, /Planned generations: 48/);
   assert.match(pending, /Additional estimated cost: \$2\.08/);
-  assert.match(pending, /Priority request: SS-001/);
+  assert.match(pending, /Priority request: SS-001 \(high\)/);
 });
 
 test("removeInlineKeyboard clears stale inline buttons", () => {
