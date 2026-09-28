@@ -77,7 +77,10 @@ export const aggregateStudioStatus = (params: {
   };
 };
 
-export const formatStudioStatusMessage = (summary: StudioStatusSummary): string => {
+export const formatStudioStatusMessage = (
+  summary: StudioStatusSummary,
+  options?: { campaignPageUrl?: string | null },
+): string => {
   const lines = [
     "Campaign status",
     "",
@@ -94,6 +97,10 @@ export const formatStudioStatusMessage = (summary: StudioStatusSummary): string 
     `- Estimated generation spend: ${summary.estimatedGenerationSpendLabel}`,
   ];
 
+  if (options?.campaignPageUrl) {
+    lines.push("", `Campaign overview: ${options.campaignPageUrl}`);
+  }
+
   if (summary.approvedProducts.length > 0) {
     lines.push("", "Approved products:");
     for (const product of summary.approvedProducts) {
@@ -103,7 +110,6 @@ export const formatStudioStatusMessage = (summary: StudioStatusSummary): string 
 
   return lines.join("\n");
 };
-
 export const getStudioStatusSummary = async (): Promise<StudioStatusSummary> => {
   const db = getDb();
   const [productRows, requestRows, candidateRows] = await Promise.all([

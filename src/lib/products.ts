@@ -64,12 +64,17 @@ export const formatApprovalCompletionMessage = (params: {
   sku: string;
   approvedCount: number;
   productPageUrl: string;
-}): string =>
-  [
+  campaignPageUrl?: string | null;
+}): string => {
+  const lines = [
     `${params.sku} marked approved (${params.approvedCount} approvals).`,
     `Product page: ${params.productPageUrl}`,
-  ].join("\n");
-
+  ];
+  if (params.campaignPageUrl) {
+    lines.push(`Campaign: ${params.campaignPageUrl}`);
+  }
+  return lines.join("\n");
+};
 export const getProductPageData = async (sku: string): Promise<ProductPageData | null> => {
   const db = getDb();
   const productRows = await db.select().from(products).where(eq(products.sku, sku)).limit(1);

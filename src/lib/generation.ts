@@ -4,6 +4,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { resolvePublicAssetUrl } from "@/lib/assets";
 import { downloadAndStoreCandidateImage } from "@/lib/blob";
 import { runCandidateImagePipeline } from "@/lib/candidate-pipeline";
+import { buildCampaignPageUrl } from "@/lib/campaigns";
 import { getDb } from "@/lib/db";
 import { env } from "@/lib/env";
 import { parseImportWarningsPayload } from "@/lib/import-meta";
@@ -444,12 +445,20 @@ export const applyCandidateReview = async (params: {
   );
 
   if (resolution.status === WORKFLOW.approved) {
+    const requestRows = await db
+      .select({ importId: shotRequests.importId })
+      .from(shotRequests)
+      .where(eq(shotRequests.id, candidate.shotRequestId))
+      .limit(1);
+    const importId = requestRows[0]?.importId ?? null;
+
     await sendMessage(
       params.chatId,
       formatApprovalCompletionMessage({
         sku: candidate.productSku,
         approvedCount: resolution.approvedCount,
         productPageUrl: buildProductPageUrl(env.appUrl, candidate.productSku),
+        campaignPageUrl: importId ? buildCampaignPageUrl(env.appUrl, importId) : null,
       }),
     );
   } else {

@@ -99,7 +99,10 @@ export const formatPriorityRequestPreviewLine = (summary: RequestPlanSummary): s
   return `- Priority request: ${summary.priorityRequestSku}${level}`;
 };
 
-export const buildImportPreviewText = (summary: RequestPlanSummary): string => {
+export const buildImportPreviewText = (
+  summary: RequestPlanSummary,
+  options?: { campaignPageUrl?: string | null },
+): string => {
   const warningLines =
     summary.warnings.length === 0
       ? ["- None"]
@@ -124,13 +127,16 @@ export const buildImportPreviewText = (summary: RequestPlanSummary): string => {
     ...warningLines,
   ];
 
+  if (options?.campaignPageUrl) {
+    lines.push("", `Campaign overview: ${options.campaignPageUrl}`);
+  }
+
   if (!hasActionableGenerations(summary)) {
     lines.push("", IMPORT_UP_TO_DATE_MESSAGE);
   }
 
   return lines.join("\n");
 };
-
 export const estimatedCostMicrosForOneProduct = (): number =>
   CANDIDATES_PER_REQUEST * IMAGE_REF_COST_USD_MICROS;
 

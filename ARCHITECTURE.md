@@ -14,6 +14,7 @@ CSV (/import in Telegram)
   → Telegram photos + Approve/Reject
   → ≥2 approvals → approved + product page URL
   → /products/[sku] shows approved Blob images only
+  → /campaigns/[importId] read-only web overview
   → /status for campaign rollup + estimated spend
 ```
 
@@ -27,7 +28,8 @@ CSV (/import in Telegram)
 | `src/lib/luma.ts` | `image_ref` + `uni-1` + aspect `3:2` |
 | `src/lib/blob.ts` | Durable public Blob URLs before chat delivery |
 | `src/lib/products.ts` | Product page query; approved-only filter |
-| `src/lib/status.ts` | Campaign aggregates for `/status` |
+| `src/lib/status.ts` | Shared campaign aggregates for `/status` and web overview |
+| `src/lib/campaigns.ts` | Campaign page assembly, demo catalog, public URLs |
 | `src/lib/assets.ts` | Join root-relative `/demo/...` paths to `APP_URL` for external APIs |
 
 ## Import safety
@@ -51,13 +53,15 @@ CSV (/import in Telegram)
 - Each ready candidate is reviewed independently (Approve / Reject).
 - After every ready candidate has a decision: **approved** if ≥2 approvals, else **needs_regeneration**.
 - Failed candidates are excluded from the approval count but reported in chat.
-- Completing as approved sends the public product page URL built from `APP_URL`.
+- Completing as approved sends the public product page URL (and campaign overview URL when known) built from `APP_URL`.
 
 ## Public site
 
-- `/` — product intro and temporary demo link to SS-001 (campaign overview page comes next).
+- `/` — Telegram-first product story, four-step workflow, demo catalog, GitHub/docs links, and a link to the latest campaign when one exists (works with no imports yet).
+- `/campaigns/[importId]` — read-only campaign totals and product grid (priority, status, approved counts, product links).
 - `/products/[sku]` — metadata, original catalog photo, approved styled shots + downloads.
-- Unknown SKUs → not-found; products with no approvals → empty gallery state.
+- Unknown campaigns/SKUs → not-found; products with no approvals → empty gallery state.
+- Generation and review actions stay in Telegram; the website never exposes secrets or provider IDs.
 
 ## Cost model (estimate)
 
@@ -65,7 +69,7 @@ Configured as integer micros USD per `image_ref` image (`IMAGE_REF_COST_USD_MICR
 
 ## Near-term product work
 
-1. **Campaign homepage** — live counts and approved product list on `/`.
+None currently queued beyond polish and a fresh production deploy when credentials are ready.
 
 ## Out of scope (v1)
 

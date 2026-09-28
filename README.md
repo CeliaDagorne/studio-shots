@@ -10,7 +10,7 @@ Import a product CSV, generate lifestyle candidates with [Luma](https://lumalabs
 2. **Generate** — Confirm generation for one product at a time (spend stays controlled). Use **Generate priority** for the top SKU, or **Choose a product** for any other actionable SKU.
 3. **Review** — A reviewer approves or rejects each candidate independently in Telegram.
 4. **Publish** — Approved images appear on `/products/[sku]` with download links for the e-commerce team. Rejected candidates never show.
-5. **Track** — `/status` reports campaign counts, pipeline stages, and estimated generation spend.
+5. **Track** — `/status` in Telegram plus a read-only `/campaigns/[importId]` overview on the web.
 
 ## Intentional v1 limits
 

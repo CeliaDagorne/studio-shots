@@ -42,13 +42,13 @@ Product and engineering choices behind Studio Shots.
 
 **Impact:** Blob paths `candidates/{sku}/{candidateId}.jpg`; downloads on `/products/[sku]`.
 
-## Status lives in chat
+## Status lives in chat (with a read-only web overview)
 
-**Decision:** Campaign progress and estimated spend are a Telegram `/status` message, not a separate analytics UI.
+**Decision:** Operators track progress primarily with Telegram `/status`. A public `/campaigns/[importId]` page mirrors the same aggregates for stakeholders who need a browser view—without web generation or review actions.
 
-**Why:** Visibility without interrupting reviewers or inventing another login.
+**Why:** Visibility without interrupting reviewers or inventing another login. Chat remains the control surface; the website stays read-only.
 
-**Impact:** `status.ts` aggregates products, pipeline stages, candidates, spend, and approved product page links.
+**Impact:** `status.ts` aggregates products, pipeline stages, candidates, spend, and approved product page links. `campaigns.ts` reuses that aggregation for the campaign page. Import/`/status` messages include the campaign URL when available.
 
 ## Generation method: `image_ref` at 3:2
 

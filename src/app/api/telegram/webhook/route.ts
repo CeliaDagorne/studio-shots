@@ -1,6 +1,7 @@
 import { waitUntil } from "@vercel/functions";
 import { NextResponse } from "next/server";
 
+import { buildCampaignPageUrl, tryGetLatestCampaignSummary } from "@/lib/campaigns";
 import { parseCatalogCsv } from "@/lib/csv";
 import { env } from "@/lib/env";
 import {
@@ -38,6 +39,10 @@ import {
   sendMessage,
 } from "@/lib/telegram";
 import type { TelegramMessage, TelegramUpdate } from "@/types";
+
+const campaignPreviewOptions = (importId: string) => ({
+  campaignPageUrl: buildCampaignPageUrl(env.appUrl, importId),
+});
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -81,7 +86,7 @@ const handleImportMessage = async (message: TelegramMessage, telegramUpdateId: n
 
   const preview = await sendMessage(
     message.chat.id,
-    buildImportPreviewText(summary),
+    buildImportPreviewText(summary, campaignPreviewOptions(summary.importId)),
     importPreviewKeyboard(summary.importId, summary),
   );
   await setPreviewMessageId(summary.importId, preview.message_id);
@@ -91,11 +96,19 @@ const handleCommand = async (message: TelegramMessage, command: string) => {
   switch (command) {
     case "/start":
     case "/help":
-      await sendMessage(message.chat.id, helpMessage());
+      await sendMessage(message.chat.id, helpMessage(env.appUrl));
       return;
     case "/status": {
-      const summary = await getStudioStatusSummary();
-      await sendMessage(message.chat.id, formatStudioStatusMessage(summary));
+      const [summary, latestCampaign] = await Promise.all([
+        getStudioStatusSummary(),
+        tryGetLatestCampaignSummary(),
+      ]);
+      await sendMessage(
+        message.chat.id,
+        formatStudioStatusMessage(summary, {
+          campaignPageUrl: latestCampaign?.campaignPageUrl ?? null,
+        }),
+      );
       return;
     }
     default:
@@ -173,7 +186,7 @@ const handleImportCallback = async (
   }
 
   const summary = importRecordToSummary(importRecord);
-  const previewText = buildImportPreviewText(summary);
+  const previewText = buildImportPreviewText(summary, campaignPreviewOptions(importRecord.id));
 
   if (parsed.action !== "gen" && !assertCallbackImportId(parsed.importId, importRecord.id)) {
     await answerCallbackQuery(callbackId, "That button does not match this import.");

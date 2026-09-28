@@ -265,8 +265,9 @@ export const parseImportCallbackData = (data: string): ImportCallbackAction | nu
   return null;
 };
 
-export const helpMessage = () =>
-  [
+export const helpMessage = (appUrl?: string) => {
+  const base = (appUrl ?? "").replace(/\/+$/, "");
+  const lines = [
     "Studio Shots — styled product photography, reviewed in Telegram.",
     "",
     "Import:",
@@ -281,9 +282,19 @@ export const helpMessage = () =>
     "Team visibility:",
     "- /status — campaign progress and estimated generation spend",
     "- /help — this message",
+  ];
+
+  if (base) {
+    lines.push(`- Campaign overview pages: ${base}/campaigns/<importId>`);
+  }
+
+  lines.push(
     "",
     "Why the /import caption is required:",
     "- Telegram bots in groups usually run with privacy mode enabled",
     "- With privacy mode on, plain file attachments may never reach the bot",
     "- A /import caption makes the upload an explicit bot command",
-  ].join("\n");
+  );
+
+  return lines.join("\n");
+};
