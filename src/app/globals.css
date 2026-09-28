@@ -1,13 +1,13 @@
 :root {
-  --ink: #14201c;
-  --muted: #5a6a62;
-  --paper: #eef2ef;
-  --paper-deep: #dde5df;
-  --panel: rgba(250, 252, 250, 0.78);
-  --line: rgba(20, 32, 28, 0.12);
-  --accent: #1f6b57;
-  --accent-soft: #cfe5db;
-  --shadow: 0 24px 60px rgba(20, 32, 28, 0.12);
+  --ink: #22182c;
+  --muted: #5d5166;
+  --paper: #f4eef8;
+  --paper-deep: #e8dceb;
+  --panel: rgba(252, 248, 255, 0.82);
+  --line: rgba(40, 24, 56, 0.12);
+  --accent: #7d5a9e;
+  --accent-soft: #e5d4ef;
+  --shadow: 0 24px 60px rgba(40, 24, 56, 0.12);
   --radius: 1.25rem;
 }
 
@@ -25,9 +25,17 @@ body {
   color: var(--ink);
   font-family: var(--font-sans), "Avenir Next", sans-serif;
   background:
-    radial-gradient(circle at 14% 10%, rgba(207, 229, 219, 0.95), transparent 40%),
-    radial-gradient(circle at 90% 4%, rgba(214, 224, 232, 0.7), transparent 34%),
-    linear-gradient(180deg, #f4f7f5 0%, var(--paper) 52%, #e3ebe6 100%);
+    radial-gradient(
+      circle at 14% 10%,
+      rgba(214, 188, 232, 0.95),
+      transparent 42%
+    ),
+    radial-gradient(
+      circle at 90% 4%,
+      rgba(232, 210, 240, 0.75),
+      transparent 36%
+    ),
+    linear-gradient(180deg, #f7f2fb 0%, var(--paper) 52%, #ebe0f2 100%);
 }
 
 a {

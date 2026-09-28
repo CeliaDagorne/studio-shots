@@ -129,8 +129,8 @@
 .figureFrame {
   overflow: hidden;
   border-radius: var(--radius);
-  background: #f7faf8;
-  box-shadow: 0 14px 36px rgba(28, 36, 32, 0.08);
+  background: var(--panel);
+  box-shadow: var(--shadow);
 }
 
 .figureFrame img {
