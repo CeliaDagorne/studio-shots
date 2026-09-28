@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 
-import type { CatalogPriority, CatalogRow, CatalogWarning, RequestPlanSummary } from "@/types";
+import type {
+  ActionableProductOption,
+  CatalogPriority,
+  CatalogRow,
+  CatalogWarning,
+  RequestPlanSummary,
+} from "@/types";
 
 export const IMAGE_REF_COST_USD_MICROS = 43_400;
 export const MVP_ASPECT_RATIO = "3:2";
@@ -125,6 +131,12 @@ export const buildImportPreviewText = (summary: RequestPlanSummary): string => {
   return lines.join("\n");
 };
 
+export const estimatedCostMicrosForOneProduct = (): number =>
+  CANDIDATES_PER_REQUEST * IMAGE_REF_COST_USD_MICROS;
+
+export const formatProductPickerButtonText = (option: ActionableProductOption): string =>
+  `${option.sku} · ${option.priority} · ~${formatUsdMicros(estimatedCostMicrosForOneProduct())}`;
+
 export const requestPlanFromCounts = (params: {
   totalCatalogRows: number;
   rowsWithShotIdea: number;
@@ -133,6 +145,7 @@ export const requestPlanFromCounts = (params: {
   unchangedExistingRequests: number;
   existingPendingRequests: number;
   warnings: CatalogWarning[];
+  actionableProducts?: ActionableProductOption[];
   priorityRequestSku: string | null;
   priorityRequestPriority: CatalogPriority | null;
   importId: string;
@@ -141,6 +154,7 @@ export const requestPlanFromCounts = (params: {
     params.newRequests + params.changedRequests + params.existingPendingRequests;
   return {
     ...params,
+    actionableProducts: params.actionableProducts ?? [],
     requestsReadyToGenerate,
     plannedGenerations: requestsReadyToGenerate * CANDIDATES_PER_REQUEST,
     additionalEstimatedCostMicrosUsd:

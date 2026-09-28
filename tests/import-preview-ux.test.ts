@@ -43,9 +43,11 @@ test("importPreviewKeyboard includes generate actions for pending unchanged requ
 
   const keyboard = importPreviewKeyboard(summary.importId, summary);
   assert.ok(keyboard);
-  assert.equal(keyboard.inline_keyboard.length, 2);
+  assert.equal(keyboard.inline_keyboard.length, 3);
   assert.match(keyboard.inline_keyboard[0]?.[0]?.callback_data ?? "", /imp:priority:test-import-id/);
-  assert.equal(keyboard.inline_keyboard[1]?.[0]?.text, "Cancel");
+  assert.equal(keyboard.inline_keyboard[0]?.[0]?.text, "Generate priority: SS-001");
+  assert.equal(keyboard.inline_keyboard[1]?.[0]?.text, "Choose a product");
+  assert.equal(keyboard.inline_keyboard[2]?.[0]?.text, "Cancel");
 });
 
 test("buildImportPreviewText includes up-to-date message only when nothing is actionable", () => {

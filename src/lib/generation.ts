@@ -6,6 +6,7 @@ import { downloadAndStoreCandidateImage } from "@/lib/blob";
 import { runCandidateImagePipeline } from "@/lib/candidate-pipeline";
 import { getDb } from "@/lib/db";
 import { env } from "@/lib/env";
+import { parseImportWarningsPayload } from "@/lib/import-meta";
 import {
   buildImageRefPrompt,
   createImageRefGeneration,
@@ -75,6 +76,28 @@ export const findActionablePriorityRequest = async (importId: string) => {
     return null;
   }
 
+  const { parseImportWarningsPayload } = await import("@/lib/import-meta");
+  const payload = parseImportWarningsPayload(importRecord.warnings);
+  const priorityOption = payload.actionable.find(
+    (option) => option.sku === importRecord.priorityRequestSku,
+  );
+
+  if (priorityOption) {
+    const byId = await db
+      .select()
+      .from(shotRequests)
+      .where(
+        and(
+          eq(shotRequests.id, priorityOption.requestId),
+          eq(shotRequests.workflowStatus, WORKFLOW.importedUnconfirmed),
+        ),
+      )
+      .limit(1);
+    if (byId[0]) {
+      return byId[0];
+    }
+  }
+
   const rows = await db
     .select()
     .from(shotRequests)
@@ -87,6 +110,16 @@ export const findActionablePriorityRequest = async (importId: string) => {
     .orderBy(asc(shotRequests.createdAt))
     .limit(1);
 
+  return rows[0] ?? null;
+};
+
+export const getShotRequestById = async (shotRequestId: string) => {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(shotRequests)
+    .where(eq(shotRequests.id, shotRequestId))
+    .limit(1);
   return rows[0] ?? null;
 };
 
@@ -175,24 +208,23 @@ const processOneCandidate = async (params: {
   return "failed";
 };
 
-export const runPriorityGeneration = async (params: {
-  importId: string;
+export const runShotRequestGeneration = async (params: {
+  shotRequestId: string;
   chatId: number;
-}): Promise<void> => {
-  const claimedRequest = await findActionablePriorityRequest(params.importId).then(async (request) => {
-    if (!request) return null;
-    return claimShotRequestForGeneration(request.id);
-  });
+  label?: string;
+}): Promise<{ claimed: boolean }> => {
+  const claimedRequest = await claimShotRequestForGeneration(params.shotRequestId);
 
   if (!claimedRequest) {
     await sendMessage(
       params.chatId,
-      "Priority generation was skipped — no actionable priority request, or it was already claimed.",
+      "That product is no longer available to generate — it may already be generating, complete, or cancelled.",
     );
-    return;
+    return { claimed: false };
   }
 
   const shotRequestId = claimedRequest.id;
+  const label = params.label ?? claimedRequest.productSku;
 
   try {
     const db = getDb();
@@ -284,7 +316,7 @@ export const runPriorityGeneration = async (params: {
           failed[0]?.errorMessage ? ` First error: ${failed[0].errorMessage}` : ""
         }`,
       );
-      return;
+      return { claimed: true };
     }
 
     await markRequestStatus(shotRequestId, WORKFLOW.awaitingReview);
@@ -300,14 +332,46 @@ export const runPriorityGeneration = async (params: {
         `${claimedRequest.productSku}: all ${ready.length} candidates are ready. Approve or reject each photo. Done requires at least 2 approvals.`,
       );
     }
+    return { claimed: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown generation failure";
     await ensureRequestLeavesGenerating(shotRequestId, WORKFLOW.failed);
     await sendMessage(
       params.chatId,
-      `Priority generation crashed for request ${shotRequestId}: ${message}`,
+      `Generation crashed for ${label} (request ${shotRequestId}): ${message}`,
     );
+    return { claimed: true };
   }
+};
+
+export const runPriorityGeneration = async (params: {
+  importId: string;
+  chatId: number;
+}): Promise<void> => {
+  const request = await findActionablePriorityRequest(params.importId);
+  if (!request) {
+    await sendMessage(
+      params.chatId,
+      "Priority generation was skipped — no actionable priority request, or it was already claimed.",
+    );
+    return;
+  }
+
+  await runShotRequestGeneration({
+    shotRequestId: request.id,
+    chatId: params.chatId,
+    label: `priority ${request.productSku}`,
+  });
+};
+
+export const runSelectedRequestGeneration = async (params: {
+  shotRequestId: string;
+  chatId: number;
+}): Promise<void> => {
+  await runShotRequestGeneration({
+    shotRequestId: params.shotRequestId,
+    chatId: params.chatId,
+  });
 };
 
 export const applyCandidateReview = async (params: {

@@ -1,6 +1,11 @@
+import {
+  estimatedCostMicrosForOneProduct,
+  formatProductPickerButtonText,
+  formatUsdMicros,
+} from "@/lib/request-planning";
 import { env } from "@/lib/env";
 
-import type { RequestPlanSummary } from "@/types";
+import type { ActionableProductOption, RequestPlanSummary } from "@/types";
 
 type InlineKeyboardButton = {
   text: string;
@@ -10,6 +15,8 @@ type InlineKeyboardButton = {
 type InlineKeyboardMarkup = {
   inline_keyboard: InlineKeyboardButton[][];
 };
+
+export const PRODUCT_PICKER_PAGE_SIZE = 6;
 
 const telegramFetch = async <T>(method: string, body?: Record<string, unknown>): Promise<T> => {
   const response = await fetch(`https://api.telegram.org/bot${env.telegramBotToken}/${method}`, {
@@ -125,12 +132,81 @@ export const importPreviewKeyboard = (
     return undefined;
   }
 
+  const priorityLabel = summary.priorityRequestSku
+    ? `Generate priority: ${summary.priorityRequestSku}`
+    : "Generate priority";
+
   return {
     inline_keyboard: [
-      [{ text: "Generate priority product first", callback_data: `imp:priority:${importId}` }],
+      [{ text: priorityLabel, callback_data: `imp:priority:${importId}` }],
+      [{ text: "Choose a product", callback_data: `imp:choose:${importId}` }],
       [{ text: "Cancel", callback_data: `imp:cancel:${importId}` }],
     ],
   };
+};
+
+export const buildProductPickerText = (
+  summary: RequestPlanSummary,
+  page: number,
+  pageSize: number = PRODUCT_PICKER_PAGE_SIZE,
+): string => {
+  const total = summary.actionableProducts.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(Math.max(page, 0), totalPages - 1);
+  const cost = formatUsdMicros(estimatedCostMicrosForOneProduct());
+
+  return [
+    "Choose a product to generate",
+    "",
+    `Actionable products: ${total}`,
+    `Estimated cost per product: ${cost} (3 candidates)`,
+    `Page ${safePage + 1} of ${totalPages}`,
+    "",
+    "Only imported, not-yet-generating products are listed.",
+  ].join("\n");
+};
+
+export const productPickerKeyboard = (
+  importId: string,
+  products: ActionableProductOption[],
+  page: number,
+  pageSize: number = PRODUCT_PICKER_PAGE_SIZE,
+): InlineKeyboardMarkup => {
+  const totalPages = Math.max(1, Math.ceil(products.length / pageSize));
+  const safePage = Math.min(Math.max(page, 0), totalPages - 1);
+  const start = safePage * pageSize;
+  const pageItems = products.slice(start, start + pageSize);
+
+  const rows: InlineKeyboardButton[][] = pageItems.map((option) => [
+    {
+      text: formatProductPickerButtonText(option),
+      callback_data: `imp:gen:${option.requestId}`,
+    },
+  ]);
+
+  const navRow: InlineKeyboardButton[] = [];
+  if (safePage > 0) {
+    navRow.push({
+      text: "Previous",
+      callback_data: `imp:page:${importId}:${safePage - 1}`,
+    });
+  }
+  if (safePage < totalPages - 1) {
+    navRow.push({
+      text: "Next",
+      callback_data: `imp:page:${importId}:${safePage + 1}`,
+    });
+  }
+  if (navRow.length > 0) {
+    rows.push(navRow);
+  }
+
+  rows.push([
+    { text: "Back", callback_data: `imp:back:${importId}` },
+    { text: "Cancel", callback_data: `imp:cancel:${importId}` },
+  ]);
+
+  return { inline_keyboard: rows };
 };
 
 export const reviewCandidateKeyboard = (candidateId: string): InlineKeyboardMarkup => ({
@@ -142,13 +218,61 @@ export const reviewCandidateKeyboard = (candidateId: string): InlineKeyboardMark
   ],
 });
 
+export type ImportCallbackAction =
+  | { action: "priority"; importId: string }
+  | { action: "choose"; importId: string }
+  | { action: "back"; importId: string }
+  | { action: "cancel"; importId: string }
+  | { action: "page"; importId: string; page: number }
+  | { action: "gen"; requestId: string };
+
+export const parseImportCallbackData = (data: string): ImportCallbackAction | null => {
+  if (!data.startsWith("imp:")) {
+    return null;
+  }
+
+  const rest = data.slice(4);
+
+  if (rest.startsWith("priority:")) {
+    return { action: "priority", importId: rest.slice("priority:".length) };
+  }
+  if (rest.startsWith("choose:")) {
+    return { action: "choose", importId: rest.slice("choose:".length) };
+  }
+  if (rest.startsWith("back:")) {
+    return { action: "back", importId: rest.slice("back:".length) };
+  }
+  if (rest.startsWith("cancel:")) {
+    return { action: "cancel", importId: rest.slice("cancel:".length) };
+  }
+  if (rest.startsWith("gen:")) {
+    return { action: "gen", requestId: rest.slice("gen:".length) };
+  }
+  if (rest.startsWith("page:")) {
+    const body = rest.slice("page:".length);
+    const lastColon = body.lastIndexOf(":");
+    if (lastColon <= 0) {
+      return null;
+    }
+    const importId = body.slice(0, lastColon);
+    const page = Number.parseInt(body.slice(lastColon + 1), 10);
+    if (!Number.isFinite(page) || page < 0) {
+      return null;
+    }
+    return { action: "page", importId, page };
+  }
+
+  return null;
+};
+
 export const helpMessage = () =>
   [
     "Studio Shots — styled product photography, reviewed in Telegram.",
     "",
     "Import:",
     "- Upload a catalog CSV with caption /import",
-    "- Review the cost preview, then generate one selected product at a time to keep spending controlled",
+    "- Review the cost preview, then generate the highest-priority product or choose any other actionable SKU",
+    "- Generation stays limited to one product at a time",
     "",
     "Review:",
     "- Approve or reject each candidate independently",

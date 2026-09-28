@@ -24,7 +24,7 @@ Product and engineering choices behind Studio Shots.
 
 **Why:** Every image has a dollar cost. Teams need a clear gate before spend, and a way to stop after proving quality on one SKU.
 
-**Impact:** Cost preview before confirm; priority-first shortcut today; SKU picker next; atomic DB claim before Luma.
+**Impact:** Cost preview before confirm; **Generate priority** shortcut plus paginated **Choose a product** picker; atomic DB claim before Luma; no Generate-all action.
 
 ## Priority is an explicit catalog field
 
@@ -32,7 +32,7 @@ Product and engineering choices behind Studio Shots.
 
 **Why:** Keyword scoring on Notes is brittle and opaque. Operators should set priority in the sheet they already edit.
 
-**Impact:** Missing or invalid Priority fails the import with a clear error. Among actionable requests, selection is `high` > `normal` > `low`, with CSV order breaking ties. Import preview shows the chosen SKU and its priority level. Notes never influence ranking.
+**Impact:** Missing or invalid Priority fails the import with a clear error. Among actionable requests, selection is `high` > `normal` > `low`, with CSV order breaking ties. Import preview shows the chosen SKU and its priority level. The product picker lists each actionable SKU with its priority and estimated cost. Notes never influence ranking.
 
 ## Durable storage before chat
 

@@ -3,23 +3,37 @@ import { NextResponse } from "next/server";
 
 import { parseCatalogCsv } from "@/lib/csv";
 import { env } from "@/lib/env";
-import { applyCandidateReview, runPriorityGeneration } from "@/lib/generation";
 import {
-  confirmImport,
+  applyCandidateReview,
+  getShotRequestById,
+  runPriorityGeneration,
+  runSelectedRequestGeneration,
+} from "@/lib/generation";
+import {
+  cancelImport,
   getImportByPreviewMessage,
   importRecordToSummary,
+  listActionableProductsForImport,
+  loadStillActionableProductsForImport,
   setPreviewMessageId,
   upsertCatalogAndPlanImport,
 } from "@/lib/imports";
+import {
+  evaluateProductSelection,
+  selectionErrorMessage,
+} from "@/lib/product-selection";
 import { buildImportPreviewText } from "@/lib/request-planning";
 import { formatStudioStatusMessage, getStudioStatusSummary } from "@/lib/status";
 import {
   answerCallbackQuery,
+  buildProductPickerText,
   editMessageText,
   getFileContents,
   helpMessage,
   importPreviewKeyboard,
   isAllowedChat,
+  parseImportCallbackData,
+  productPickerKeyboard,
   removeInlineKeyboard,
   sendMessage,
 } from "@/lib/telegram";
@@ -119,16 +133,37 @@ const handleCandidateCallback = async (
   );
 };
 
+const assertCallbackImportId = (
+  expectedImportId: string | undefined,
+  importRecordId: string,
+): boolean => {
+  if (!expectedImportId) {
+    return true;
+  }
+  return expectedImportId === importRecordId;
+};
+
 const handleImportCallback = async (
   callbackId: string,
   data: string,
   chatId: number,
   messageId: number,
 ) => {
+  const parsed = parseImportCallbackData(data);
+  if (!parsed) {
+    await answerCallbackQuery(callbackId, "Unknown action.");
+    return;
+  }
+
   const importRecord = await getImportByPreviewMessage(chatId, messageId);
 
   if (!importRecord) {
     await answerCallbackQuery(callbackId, "That import preview could not be found.");
+    return;
+  }
+
+  if (importRecord.confirmationAction === "cancelled") {
+    await answerCallbackQuery(callbackId, "This import was cancelled.");
     return;
   }
 
@@ -137,21 +172,80 @@ const handleImportCallback = async (
     return;
   }
 
-  const [, action] = data.split(":");
+  const summary = importRecordToSummary(importRecord);
+  const previewText = buildImportPreviewText(summary);
 
-  const finalizedText = (suffix: string) =>
-    `${buildImportPreviewText(importRecordToSummary(importRecord))}\n\n${suffix}`;
+  if (parsed.action !== "gen" && !assertCallbackImportId(parsed.importId, importRecord.id)) {
+    await answerCallbackQuery(callbackId, "That button does not match this import.");
+    return;
+  }
 
-  if (action === "priority") {
-    const claimed = await confirmImport(importRecord.id, "priority_first");
-    if (!claimed) {
+  if (parsed.action === "choose") {
+    const actionable = await loadStillActionableProductsForImport(importRecord);
+    if (actionable.length === 0) {
+      await answerCallbackQuery(callbackId, "No actionable products left.");
+      return;
+    }
+    await editMessageText(
+      chatId,
+      messageId,
+      buildProductPickerText({ ...summary, actionableProducts: actionable }, 0),
+      productPickerKeyboard(importRecord.id, actionable, 0),
+    );
+    await answerCallbackQuery(callbackId, "Choose a product.");
+    return;
+  }
+
+  if (parsed.action === "page") {
+    const actionable = await loadStillActionableProductsForImport(importRecord);
+    await editMessageText(
+      chatId,
+      messageId,
+      buildProductPickerText({ ...summary, actionableProducts: actionable }, parsed.page),
+      productPickerKeyboard(importRecord.id, actionable, parsed.page),
+    );
+    await answerCallbackQuery(callbackId, `Page ${parsed.page + 1}`);
+    return;
+  }
+
+  if (parsed.action === "back") {
+    await editMessageText(
+      chatId,
+      messageId,
+      previewText,
+      importPreviewKeyboard(importRecord.id, summary),
+    );
+    await answerCallbackQuery(callbackId, "Back to import preview.");
+    return;
+  }
+
+  if (parsed.action === "cancel") {
+    const cancelled = await cancelImport(importRecord.id);
+    if (!cancelled) {
       await answerCallbackQuery(callbackId, "This import has already been handled.");
       return;
     }
     await editMessageText(
       chatId,
       messageId,
-      finalizedText("Confirmed: generating priority product first in the background."),
+      `${previewText}\n\nCancelled.`,
+      removeInlineKeyboard(),
+    );
+    await answerCallbackQuery(callbackId, "Import cancelled.");
+    return;
+  }
+
+  if (parsed.action === "priority") {
+    const prioritySku = importRecord.priorityRequestSku;
+    if (!prioritySku) {
+      await answerCallbackQuery(callbackId, "No priority product is available.");
+      return;
+    }
+
+    await editMessageText(
+      chatId,
+      messageId,
+      `${previewText}\n\nConfirmed: generating priority product ${prioritySku} in the background.`,
       removeInlineKeyboard(),
     );
     await answerCallbackQuery(callbackId, "Priority generation started.");
@@ -168,23 +262,49 @@ const handleImportCallback = async (
     return;
   }
 
-  if (action !== "cancel") {
-    await answerCallbackQuery(callbackId, "Unknown action.");
+  if (parsed.action === "gen") {
+    const actionable = listActionableProductsForImport(importRecord);
+    const request = await getShotRequestById(parsed.requestId);
+    const evaluation = evaluateProductSelection({
+      actionable,
+      requestId: parsed.requestId,
+      request: request
+        ? {
+            id: request.id,
+            productSku: request.productSku,
+            workflowStatus: request.workflowStatus,
+          }
+        : null,
+    });
+
+    if (!evaluation.ok) {
+      await answerCallbackQuery(callbackId, selectionErrorMessage(evaluation.reason));
+      return;
+    }
+
+    const option = evaluation.option;
+
+    await editMessageText(
+      chatId,
+      messageId,
+      `${previewText}\n\nConfirmed: generating ${option.sku} (${option.priority}) in the background.`,
+      removeInlineKeyboard(),
+    );
+    await answerCallbackQuery(callbackId, `Generating ${option.sku}.`);
+
+    waitUntil(
+      runSelectedRequestGeneration({
+        shotRequestId: option.requestId,
+        chatId,
+      }).catch(async (error) => {
+        const message = error instanceof Error ? error.message : "Unknown background failure";
+        await sendMessage(chatId, `Background generation failed: ${message}`);
+      }),
+    );
     return;
   }
 
-  const cancelled = await confirmImport(importRecord.id, "cancelled");
-  if (!cancelled) {
-    await answerCallbackQuery(callbackId, "This import has already been handled.");
-    return;
-  }
-  await editMessageText(
-    chatId,
-    messageId,
-    finalizedText("Cancelled."),
-    removeInlineKeyboard(),
-  );
-  await answerCallbackQuery(callbackId, "Import cancelled.");
+  await answerCallbackQuery(callbackId, "Unknown action.");
 };
 
 const handleCallback = async (update: TelegramUpdate) => {

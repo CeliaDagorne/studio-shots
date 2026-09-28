@@ -7,7 +7,7 @@ Import a product CSV, generate lifestyle candidates with [Luma](https://lumalabs
 ## What it does
 
 1. **Import** — Upload a catalog CSV in Telegram with caption `/import`. The bot replies with a cost preview before any paid generation.
-2. **Generate** — Confirm generation for one product at a time (spend stays controlled). Demo flow: generate the highest-priority actionable product first.
+2. **Generate** — Confirm generation for one product at a time (spend stays controlled). Use **Generate priority** for the top SKU, or **Choose a product** for any other actionable SKU.
 3. **Review** — A reviewer approves or rejects each candidate independently in Telegram.
 4. **Publish** — Approved images appear on `/products/[sku]` with download links for the e-commerce team. Rejected candidates never show.
 5. **Track** — `/status` reports campaign counts, pipeline stages, and estimated generation spend.
@@ -41,6 +41,7 @@ Photo paths are root-relative (`/demo/...`) and resolved against `APP_URL` when 
 - **`Priority` is required** on every row. Accepted values: `high`, `normal`, `low` (case-insensitive; whitespace trimmed).
 - Among actionable shot requests, Studio Shots selects the highest priority (`high` > `normal` > `low`). Equal priorities keep CSV order.
 - Notes never affect priority ranking.
+- After import, Telegram offers **Generate priority**, **Choose a product** (paginated list with SKU, priority, and estimated cost), and **Cancel**.
 
 ## Stack
 

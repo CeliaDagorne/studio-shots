@@ -7,7 +7,7 @@ Studio Shots turns catalog shot ideas into reviewer-approved lifestyle images wi
 ```text
 CSV (/import in Telegram)
   → plan + cost preview (Neon)
-  → confirm one product
+  → Generate priority OR Choose a product (paginated)
   → claim request (imported_unconfirmed → generating)
   → Luma image_ref × 3 (concurrent) @ 3:2
   → download → Vercel Blob
@@ -43,6 +43,8 @@ CSV (/import in Telegram)
 - Work continues after the webhook returns `200` (`waitUntil`, `maxDuration` on the route).
 - Candidate images are stored on Blob; Telegram receives Blob URLs (not short-lived Luma URLs).
 - One product is generated per confirm action in v1.
+- Import preview offers a priority shortcut plus a paginated product picker (6 SKUs per page). Callbacks carry stable import/request IDs only.
+- Stale picker taps (already generating / complete / not in this import) get a clear callback error and do not call Luma.
 
 ## Review rules
 
@@ -63,8 +65,7 @@ Configured as integer micros USD per `image_ref` image (`IMAGE_REF_COST_USD_MICR
 
 ## Near-term product work
 
-1. **SKU picker** — after import, choose any actionable SKU (paginated inline buttons), plus keep “highest priority first.”
-2. **Campaign homepage** — live counts and approved product list on `/`.
+1. **Campaign homepage** — live counts and approved product list on `/`.
 
 ## Out of scope (v1)
 

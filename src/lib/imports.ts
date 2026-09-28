@@ -4,6 +4,11 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb, getNeonSql } from "@/lib/db";
 import { collectCatalogWarnings } from "@/lib/csv";
 import {
+  parseImportWarningsPayload,
+  serializeImportWarningsPayload,
+} from "@/lib/import-meta";
+import { filterActionableOptionsByStatus } from "@/lib/product-selection";
+import {
   classifyRequestChange,
   catalogPriorityRank,
   computeRequestHash,
@@ -11,7 +16,13 @@ import {
   requestPlanFromCounts,
 } from "@/lib/request-planning";
 import { generationCandidates, imports, products, shotRequests } from "@/lib/schema";
-import type { CatalogPriority, CatalogRow, CatalogWarning, ImportResult, RequestPlanSummary } from "@/types";
+import type {
+  ActionableProductOption,
+  CatalogPriority,
+  CatalogRow,
+  ImportResult,
+  RequestPlanSummary,
+} from "@/types";
 
 const now = () => new Date();
 
@@ -127,6 +138,7 @@ export const buildImportPlan = async (
   let prioritySku: string | null = null;
   let priorityLevel: CatalogPriority | null = null;
   let bestPriorityRank = 0;
+  const actionableProducts: ActionableProductOption[] = [];
 
   const considerPriority = (row: CatalogRow) => {
     const rank = catalogPriorityRank(row.priority);
@@ -135,6 +147,15 @@ export const buildImportPlan = async (
       prioritySku = row.sku;
       priorityLevel = row.priority;
     }
+  };
+
+  const rememberActionable = (requestId: string, row: CatalogRow) => {
+    actionableProducts.push({
+      requestId,
+      sku: row.sku,
+      priority: row.priority,
+    });
+    considerPriority(row);
   };
 
   for (const row of rows) {
@@ -179,12 +200,10 @@ export const buildImportPlan = async (
       const matchingRequest = priorRequests.find((request) => request.requestHash === requestHash);
       if (matchingRequest && isActionableWorkflowStatus(matchingRequest.workflowStatus)) {
         existingPendingRequests += 1;
-        considerPriority(row);
+        rememberActionable(matchingRequest.id, row);
       }
       continue;
     }
-
-    considerPriority(row);
 
     const latestRequest = priorRequests[0];
     const requestHash = computeRequestHash(row);
@@ -208,6 +227,7 @@ export const buildImportPlan = async (
     };
 
     shotRequestInserts.push(newRequest);
+    rememberActionable(newRequest.id, row);
     const nextRequests = [newRequest, ...priorRequests];
     requestsBySku.set(row.sku, nextRequests as typeof existingRequests);
   }
@@ -222,6 +242,7 @@ export const buildImportPlan = async (
     unchangedExistingRequests,
     existingPendingRequests,
     warnings,
+    actionableProducts,
     priorityRequestSku: prioritySku,
     priorityRequestPriority: priorityLevel,
   });
@@ -240,7 +261,7 @@ export const buildImportPlan = async (
       requestsReadyToGenerate: summary.requestsReadyToGenerate,
       plannedGenerations: summary.plannedGenerations,
       additionalEstimatedCostMicrosUsd: summary.additionalEstimatedCostMicrosUsd,
-      warnings,
+      warnings: serializeImportWarningsPayload(warnings, actionableProducts),
       priorityRequestSku: summary.priorityRequestSku,
       telegramUpdateId,
       telegramChatId,
@@ -439,21 +460,29 @@ export const setPreviewMessageId = async (
     .where(eq(imports.id, importId));
 };
 
-export const confirmImport = async (
-  importId: string,
-  action: "priority_first" | "all" | "cancelled",
-): Promise<boolean> => {
+export const cancelImport = async (importId: string): Promise<boolean> => {
   const db = getDb();
   const updated = await db
     .update(imports)
     .set({
-      confirmationAction: action,
+      confirmationAction: "cancelled",
       confirmedAt: now(),
     })
     .where(and(eq(imports.id, importId), sql`${imports.confirmationAction} IS NULL`))
     .returning({ id: imports.id });
 
   return updated.length > 0;
+};
+
+/** @deprecated Prefer cancelImport — generation no longer locks the import row. */
+export const confirmImport = async (
+  importId: string,
+  action: "cancelled",
+): Promise<boolean> => {
+  if (action !== "cancelled") {
+    return false;
+  }
+  return cancelImport(importId);
 };
 
 export const getImportByPreviewMessage = async (
@@ -468,6 +497,51 @@ export const getImportByPreviewMessage = async (
     .limit(1);
 
   return rows[0] ?? null;
+};
+
+export const getImportById = async (importId: string) => {
+  const db = getDb();
+  const rows = await db.select().from(imports).where(eq(imports.id, importId)).limit(1);
+  return rows[0] ?? null;
+};
+
+export const listActionableProductsForImport = (
+  record: typeof imports.$inferSelect,
+): ActionableProductOption[] => parseImportWarningsPayload(record.warnings).actionable;
+
+export const findActionableOptionForImport = (
+  record: typeof imports.$inferSelect,
+  requestId: string,
+): ActionableProductOption | null =>
+  listActionableProductsForImport(record).find((option) => option.requestId === requestId) ?? null;
+
+export const loadStillActionableProductsForImport = async (
+  record: typeof imports.$inferSelect,
+): Promise<ActionableProductOption[]> => {
+  const options = listActionableProductsForImport(record);
+  if (options.length === 0) {
+    return [];
+  }
+
+  const db = getDb();
+  const rows = await db
+    .select({
+      id: shotRequests.id,
+      productSku: shotRequests.productSku,
+      workflowStatus: shotRequests.workflowStatus,
+    })
+    .from(shotRequests)
+    .where(
+      inArray(
+        shotRequests.id,
+        options.map((option) => option.requestId),
+      ),
+    );
+
+  return filterActionableOptionsByStatus(
+    options,
+    new Map(rows.map((row) => [row.id, row])),
+  );
 };
 
 export const getRequestStatusSummary = async () => {
@@ -487,21 +561,29 @@ export const getRequestStatusSummary = async () => {
 
 export const importRecordToSummary = (
   record: typeof imports.$inferSelect,
-): RequestPlanSummary => ({
-  importId: record.id,
-  totalCatalogRows: record.totalCatalogRows,
-  rowsWithShotIdea: record.rowsWithShotIdea,
-  newRequests: record.newRequests,
-  changedRequests: record.changedRequests,
-  unchangedExistingRequests: record.unchangedExistingRequests,
-  existingPendingRequests: record.existingPendingRequests,
-  requestsReadyToGenerate: record.requestsReadyToGenerate,
-  plannedGenerations: record.plannedGenerations,
-  additionalEstimatedCostMicrosUsd: record.additionalEstimatedCostMicrosUsd,
-  warnings: record.warnings as CatalogWarning[],
-  priorityRequestSku: record.priorityRequestSku,
-  priorityRequestPriority: null,
-});
+): RequestPlanSummary => {
+  const payload = parseImportWarningsPayload(record.warnings);
+  const priorityOption = record.priorityRequestSku
+    ? payload.actionable.find((option) => option.sku === record.priorityRequestSku)
+    : undefined;
+
+  return {
+    importId: record.id,
+    totalCatalogRows: record.totalCatalogRows,
+    rowsWithShotIdea: record.rowsWithShotIdea,
+    newRequests: record.newRequests,
+    changedRequests: record.changedRequests,
+    unchangedExistingRequests: record.unchangedExistingRequests,
+    existingPendingRequests: record.existingPendingRequests,
+    requestsReadyToGenerate: record.requestsReadyToGenerate,
+    plannedGenerations: record.plannedGenerations,
+    additionalEstimatedCostMicrosUsd: record.additionalEstimatedCostMicrosUsd,
+    warnings: payload.warnings,
+    actionableProducts: payload.actionable,
+    priorityRequestSku: record.priorityRequestSku,
+    priorityRequestPriority: priorityOption?.priority ?? null,
+  };
+};
 
 /** Test helper: remove rows created by integration tests. */
 export const deleteImportArtifacts = async (importId: string, skus: string[]) => {

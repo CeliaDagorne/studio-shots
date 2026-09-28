@@ -44,6 +44,22 @@ export type CatalogWarning = {
   message: string;
 };
 
+/** Actionable shot request exposed in the Telegram product picker. */
+export type ActionableProductOption = {
+  requestId: string;
+  sku: string;
+  priority: CatalogPriority;
+};
+
+/**
+ * JSON stored in `imports.warnings` (jsonb). Keeps catalog warnings plus the
+ * ordered actionable picker list so we can show priority without a migration.
+ */
+export type ImportWarningsPayload = {
+  warnings: CatalogWarning[];
+  actionable: ActionableProductOption[];
+};
+
 export type RequestPlanSummary = {
   totalCatalogRows: number;
   rowsWithShotIdea: number;
@@ -55,6 +71,7 @@ export type RequestPlanSummary = {
   plannedGenerations: number;
   additionalEstimatedCostMicrosUsd: number;
   warnings: CatalogWarning[];
+  actionableProducts: ActionableProductOption[];
   priorityRequestSku: string | null;
   priorityRequestPriority: CatalogPriority | null;
   importId: string;
