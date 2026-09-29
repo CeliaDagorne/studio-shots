@@ -4,6 +4,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 
+import {
+  telegramConversation,
+  toExternalEventId,
+} from "@/lib/chat-identity";
+
 const envPath = resolve(process.cwd(), ".env.local");
 try {
   const contents = readFileSync(envPath, "utf-8");
@@ -32,7 +37,7 @@ const databaseUrl = process.env.DATABASE_URL;
 const integrationEnabled = Boolean(databaseUrl);
 
 const testSku = "TEST-GEN-001";
-const testChatId = -1009990002;
+const testConversation = telegramConversation(-1009990002);
 
 const sampleRow = {
   sku: testSku,
@@ -66,8 +71,8 @@ test("atomic claim moves imported_unconfirmed to generating once", { skip: !inte
   const summary = await upsertCatalogAndPlanImport(
     [sampleRow],
     "claim-test.csv",
-    testChatId,
-    telegramUpdateId,
+    testConversation,
+    toExternalEventId(telegramUpdateId),
   );
   importId = summary.importId;
 

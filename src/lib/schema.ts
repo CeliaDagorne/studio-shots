@@ -1,5 +1,4 @@
 import {
-  bigint,
   integer,
   jsonb,
   pgTable,
@@ -34,18 +33,23 @@ export const imports = pgTable("imports", {
   additionalEstimatedCostMicrosUsd: integer("additional_estimated_cost_micros_usd").notNull(),
   warnings: jsonb("warnings").notNull(),
   priorityRequestSku: text("priority_request_sku"),
-  telegramUpdateId: bigint("telegram_update_id", { mode: "number" }).notNull(),
-  telegramChatId: bigint("telegram_chat_id", { mode: "number" }).notNull(),
-  telegramPreviewMessageId: integer("telegram_preview_message_id"),
+  platform: text("platform").notNull(),
+  conversationId: text("conversation_id").notNull(),
+  externalEventId: text("external_event_id").notNull(),
+  previewMessageId: text("preview_message_id"),
   confirmationAction: text("confirmation_action"),
   confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   previewMessageIdx: uniqueIndex("imports_preview_message_idx").on(
-    table.telegramChatId,
-    table.telegramPreviewMessageId,
+    table.platform,
+    table.conversationId,
+    table.previewMessageId,
   ),
-  telegramUpdateIdx: uniqueIndex("imports_telegram_update_id_idx").on(table.telegramUpdateId),
+  platformExternalEventIdx: uniqueIndex("imports_platform_external_event_idx").on(
+    table.platform,
+    table.externalEventId,
+  ),
 }));
 
 export const shotRequests = pgTable("shot_requests", {
@@ -80,8 +84,9 @@ export const generationCandidates = pgTable("generation_candidates", {
   blobUrl: text("blob_url"),
   prompt: text("prompt").notNull(),
   errorMessage: text("error_message"),
-  telegramChatId: bigint("telegram_chat_id", { mode: "number" }),
-  telegramMessageId: integer("telegram_message_id"),
+  platform: text("platform"),
+  conversationId: text("conversation_id"),
+  externalMessageId: text("external_message_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({

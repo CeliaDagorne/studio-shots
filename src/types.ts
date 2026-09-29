@@ -44,7 +44,7 @@ export type CatalogWarning = {
   message: string;
 };
 
-/** Actionable shot request exposed in the Telegram product picker. */
+/** Actionable shot request exposed in the chat product picker. */
 export type ActionableProductOption = {
   requestId: string;
   sku: string;
@@ -79,5 +79,5 @@ export type RequestPlanSummary = {
 
 export type ImportResult = RequestPlanSummary & {
   alreadyProcessed?: boolean;
-  previewMessageId?: number | null;
+  previewMessageId?: string | null;
 };

@@ -4,6 +4,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 
+import {
+  CHAT_PLATFORM,
+  telegramConversation,
+  toExternalEventId,
+} from "@/lib/chat-identity";
+
 const envPath = resolve(process.cwd(), ".env.local");
 try {
   const contents = readFileSync(envPath, "utf-8");
@@ -31,7 +37,7 @@ try {
 const databaseUrl = process.env.DATABASE_URL;
 const integrationEnabled = Boolean(databaseUrl);
 
-const testChatId = -1009990001;
+const testConversation = telegramConversation(-1009990001);
 
 const makeSampleRow = (sku: string) => ({
   sku,
@@ -63,7 +69,7 @@ test("persistImportPlan uses neon HTTP transaction batch", { skip: !integrationE
   const testSku = uniqueSku("TEST-HTTP");
   const sampleRow = makeSampleRow(testSku);
   const telegramUpdateId = 9_300_000_000 + Math.floor(Math.random() * 1_000_000);
-  const importId = stableImportId(telegramUpdateId);
+  const importId = stableImportId(CHAT_PLATFORM.telegram, toExternalEventId(telegramUpdateId));
 
   t.after(async () => {
     await deleteImportArtifacts(importId, [testSku]);
@@ -75,8 +81,8 @@ test("persistImportPlan uses neon HTTP transaction batch", { skip: !integrationE
   const plan = await buildImportPlan(
     [sampleRow],
     "http-transaction.csv",
-    testChatId,
-    telegramUpdateId,
+    testConversation,
+    toExternalEventId(telegramUpdateId),
   );
   assert.equal(plan.importId, importId);
 
@@ -96,13 +102,13 @@ test("persistImportPlan uses neon HTTP transaction batch", { skip: !integrationE
   assert.equal(requestRows.length, 1);
 });
 
-test("concurrent persistImportPlan with same telegram_update_id is idempotent", { skip: !integrationEnabled }, async (t) => {
+test("concurrent persistImportPlan with same platform external event is idempotent", { skip: !integrationEnabled }, async (t) => {
   const {
     buildImportPlan,
     persistImportPlan,
     deleteImportArtifacts,
     stableImportId,
-    countImportsByTelegramUpdateId,
+    countImportsByExternalEvent,
   } = await import("@/lib/imports");
   const { shotRequests } = await import("@/lib/schema");
   const { getDb } = await import("@/lib/db");
@@ -110,7 +116,7 @@ test("concurrent persistImportPlan with same telegram_update_id is idempotent", 
   const testSku = uniqueSku("TEST-CONC");
   const sampleRow = makeSampleRow(testSku);
   const telegramUpdateId = 9_400_000_000 + Math.floor(Math.random() * 1_000_000);
-  const importId = stableImportId(telegramUpdateId);
+  const importId = stableImportId(CHAT_PLATFORM.telegram, toExternalEventId(telegramUpdateId));
 
   t.after(async () => {
     await deleteImportArtifacts(importId, [testSku]);
@@ -119,13 +125,13 @@ test("concurrent persistImportPlan with same telegram_update_id is idempotent", 
   const plan = await buildImportPlan(
     [sampleRow],
     "concurrent-http-transaction.csv",
-    testChatId,
-    telegramUpdateId,
+    testConversation,
+    toExternalEventId(telegramUpdateId),
   );
 
   await Promise.all([persistImportPlan(plan), persistImportPlan(plan)]);
 
-  assert.equal(await countImportsByTelegramUpdateId(telegramUpdateId), 1);
+  assert.equal(await countImportsByExternalEvent(CHAT_PLATFORM.telegram, toExternalEventId(telegramUpdateId)), 1);
 
   const db = getDb();
   const requestRows = await db
@@ -157,8 +163,8 @@ test("import persistence integration", { skip: !integrationEnabled }, async (t) 
   const summary = await upsertCatalogAndPlanImport(
     [sampleRow],
     "integration-test.csv",
-    testChatId,
-    telegramUpdateId,
+    testConversation,
+    toExternalEventId(telegramUpdateId),
   );
   importId = summary.importId;
 
@@ -168,7 +174,9 @@ test("import persistence integration", { skip: !integrationEnabled }, async (t) 
   const db = getDb();
   const importRows = await db.select().from(imports).where(eq(imports.id, importId));
   assert.equal(importRows.length, 1);
-  assert.equal(importRows[0]?.telegramUpdateId, telegramUpdateId);
+  assert.equal(importRows[0]?.platform, CHAT_PLATFORM.telegram);
+  assert.equal(importRows[0]?.externalEventId, toExternalEventId(telegramUpdateId));
+  assert.equal(importRows[0]?.conversationId, testConversation.conversationId);
 
   const productRows = await db.select().from(products).where(eq(products.sku, testSku));
   assert.equal(productRows.length, 1);
@@ -182,11 +190,11 @@ test("import persistence integration", { skip: !integrationEnabled }, async (t) 
   assert.ok(importRows[0], "import row must exist before shot_requests FK is satisfied");
 });
 
-test("telegram update retry is idempotent", { skip: !integrationEnabled }, async (t) => {
+test("external event retry is idempotent", { skip: !integrationEnabled }, async (t) => {
   const {
     upsertCatalogAndPlanImport,
     deleteImportArtifacts,
-    countImportsByTelegramUpdateId,
+    countImportsByExternalEvent,
   } = await import("@/lib/imports");
   const { shotRequests } = await import("@/lib/schema");
   const { getDb } = await import("@/lib/db");
@@ -206,21 +214,21 @@ test("telegram update retry is idempotent", { skip: !integrationEnabled }, async
   const first = await upsertCatalogAndPlanImport(
     [sampleRow],
     "integration-retry.csv",
-    testChatId,
-    telegramUpdateId,
+    testConversation,
+    toExternalEventId(telegramUpdateId),
   );
   importId = first.importId;
 
   const second = await upsertCatalogAndPlanImport(
     [sampleRow],
     "integration-retry.csv",
-    testChatId,
-    telegramUpdateId,
+    testConversation,
+    toExternalEventId(telegramUpdateId),
   );
 
   assert.equal(second.alreadyProcessed, true);
   assert.equal(second.importId, first.importId);
-  assert.equal(await countImportsByTelegramUpdateId(telegramUpdateId), 1);
+  assert.equal(await countImportsByExternalEvent(CHAT_PLATFORM.telegram, toExternalEventId(telegramUpdateId)), 1);
 
   const db = getDb();
   const requestRows = await db
@@ -264,8 +272,8 @@ test("unchanged unconfirmed requests remain actionable without duplication", { s
   const first = await upsertCatalogAndPlanImport(
     [priorityRow],
     "actionable-pending-first.csv",
-    testChatId,
-    telegramUpdateId,
+    testConversation,
+    toExternalEventId(telegramUpdateId),
   );
   firstImportId = first.importId;
   assert.equal(first.newRequests, 1);
@@ -276,8 +284,8 @@ test("unchanged unconfirmed requests remain actionable without duplication", { s
   const second = await upsertCatalogAndPlanImport(
     [priorityRow],
     "actionable-pending-second.csv",
-    testChatId,
-    telegramUpdateId + 1,
+    testConversation,
+    toExternalEventId(telegramUpdateId + 1),
   );
   secondImportId = second.importId;
 
@@ -325,8 +333,8 @@ test("unchanged completed requests are not actionable", { skip: !integrationEnab
   const first = await upsertCatalogAndPlanImport(
     [sampleRow],
     "completed-first.csv",
-    testChatId,
-    telegramUpdateId,
+    testConversation,
+    toExternalEventId(telegramUpdateId),
   );
   firstImportId = first.importId;
 
@@ -339,8 +347,8 @@ test("unchanged completed requests are not actionable", { skip: !integrationEnab
   const second = await upsertCatalogAndPlanImport(
     [sampleRow],
     "completed-second.csv",
-    testChatId,
-    telegramUpdateId + 1,
+    testConversation,
+    toExternalEventId(telegramUpdateId + 1),
   );
   secondImportId = second.importId;
 
@@ -379,16 +387,16 @@ test("identical imports never create duplicate shot requests", { skip: !integrat
   const first = await upsertCatalogAndPlanImport(
     [sampleRow],
     "duplicate-guard-first.csv",
-    testChatId,
-    telegramUpdateId,
+    testConversation,
+    toExternalEventId(telegramUpdateId),
   );
   firstImportId = first.importId;
 
   const second = await upsertCatalogAndPlanImport(
     [sampleRow],
     "duplicate-guard-second.csv",
-    testChatId,
-    telegramUpdateId + 1,
+    testConversation,
+    toExternalEventId(telegramUpdateId + 1),
   );
   secondImportId = second.importId;
 
@@ -440,8 +448,8 @@ test("retry succeeds when products already exist from a prior failed import", { 
   const summary = await upsertCatalogAndPlanImport(
     [sampleRow],
     "integration-partial-products.csv",
-    testChatId,
-    telegramUpdateId,
+    testConversation,
+    toExternalEventId(telegramUpdateId),
   );
   importId = summary.importId;
 

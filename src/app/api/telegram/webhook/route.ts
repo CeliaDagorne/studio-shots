@@ -2,6 +2,11 @@ import { waitUntil } from "@vercel/functions";
 import { NextResponse } from "next/server";
 
 import { buildCampaignPageUrl, tryGetLatestCampaignSummary } from "@/lib/campaigns";
+import {
+  telegramConversation,
+  toExternalEventId,
+  toExternalMessageId,
+} from "@/lib/chat-identity";
 import { parseCatalogCsv } from "@/lib/csv";
 import { env } from "@/lib/env";
 import {
@@ -70,14 +75,15 @@ const handleImportMessage = async (message: TelegramMessage, telegramUpdateId: n
     return;
   }
 
+  const conversation = telegramConversation(message.chat.id);
   const filename = message.document.file_name ?? "catalog.csv";
   const fileContents = await getFileContents(message.document.file_id);
   const rows = parseCatalogCsv(fileContents);
   const summary = await upsertCatalogAndPlanImport(
     rows,
     filename,
-    Number(message.chat.id),
-    telegramUpdateId,
+    conversation,
+    toExternalEventId(telegramUpdateId),
   );
 
   if (summary.alreadyProcessed && summary.previewMessageId) {
@@ -89,7 +95,7 @@ const handleImportMessage = async (message: TelegramMessage, telegramUpdateId: n
     buildImportPreviewText(summary, campaignPreviewOptions(summary.importId)),
     importPreviewKeyboard(summary.importId, summary),
   );
-  await setPreviewMessageId(summary.importId, preview.message_id);
+  await setPreviewMessageId(summary.importId, toExternalMessageId(preview.message_id));
 };
 
 const handleCommand = async (message: TelegramMessage, command: string) => {
@@ -131,8 +137,8 @@ const handleCandidateCallback = async (
   const result = await applyCandidateReview({
     candidateId,
     decision: action === "approve" ? "approved" : "rejected",
-    chatId,
-    messageId,
+    conversation: telegramConversation(chatId),
+    externalMessageId: toExternalMessageId(messageId),
   });
 
   if (result.alreadyReviewed) {
@@ -168,7 +174,10 @@ const handleImportCallback = async (
     return;
   }
 
-  const importRecord = await getImportByPreviewMessage(chatId, messageId);
+  const importRecord = await getImportByPreviewMessage(
+    telegramConversation(chatId),
+    toExternalMessageId(messageId),
+  );
 
   if (!importRecord) {
     await answerCallbackQuery(callbackId, "That import preview could not be found.");
@@ -266,7 +275,7 @@ const handleImportCallback = async (
     waitUntil(
       runPriorityGeneration({
         importId: importRecord.id,
-        chatId,
+        conversation: telegramConversation(chatId),
       }).catch(async (error) => {
         const message = error instanceof Error ? error.message : "Unknown background failure";
         await sendMessage(chatId, `Background priority generation failed: ${message}`);
@@ -308,7 +317,7 @@ const handleImportCallback = async (
     waitUntil(
       runSelectedRequestGeneration({
         shotRequestId: option.requestId,
-        chatId,
+        conversation: telegramConversation(chatId),
       }).catch(async (error) => {
         const message = error instanceof Error ? error.message : "Unknown background failure";
         await sendMessage(chatId, `Background generation failed: ${message}`);

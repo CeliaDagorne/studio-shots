@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
+import {
+  type ChatConversation,
+  type ChatPlatform,
+} from "@/lib/chat-identity";
 import { getDb, getNeonSql } from "@/lib/db";
 import { collectCatalogWarnings } from "@/lib/csv";
 import {
@@ -35,8 +39,15 @@ const hashToUuid = (hex: string): string =>
     hex.slice(20, 32),
   ].join("-");
 
-export const stableImportId = (telegramUpdateId: number): string =>
-  hashToUuid(createHash("sha256").update(`import:${telegramUpdateId}`).digest("hex"));
+export const stableImportId = (
+  platform: ChatPlatform,
+  externalEventId: string,
+): string =>
+  hashToUuid(
+    createHash("sha256")
+      .update(`import:${platform}:${externalEventId}`)
+      .digest("hex"),
+  );
 
 export const stableShotRequestId = (
   importId: string,
@@ -77,21 +88,29 @@ export type ImportPersistPlan = {
   summary: RequestPlanSummary;
 };
 
-const isTelegramUpdateIdConflict = (error: unknown): boolean => {
+const isExternalEventConflict = (error: unknown): boolean => {
   if (!(error instanceof Error)) {
     return false;
   }
 
   const message = error.message.toLowerCase();
-  return message.includes("imports_telegram_update_id_idx") || message.includes("telegram_update_id");
+  return (
+    message.includes("imports_platform_external_event_idx") ||
+    message.includes("external_event_id")
+  );
 };
 
-export const findImportByTelegramUpdateId = async (telegramUpdateId: number) => {
+export const findImportByExternalEvent = async (
+  platform: ChatPlatform,
+  externalEventId: string,
+) => {
   const db = getDb();
   const rows = await db
     .select()
     .from(imports)
-    .where(eq(imports.telegramUpdateId, telegramUpdateId))
+    .where(
+      and(eq(imports.platform, platform), eq(imports.externalEventId, externalEventId)),
+    )
     .limit(1);
 
   return rows[0] ?? null;
@@ -100,11 +119,11 @@ export const findImportByTelegramUpdateId = async (telegramUpdateId: number) => 
 export const buildImportPlan = async (
   rows: CatalogRow[],
   filename: string,
-  telegramChatId: number,
-  telegramUpdateId: number,
+  conversation: ChatConversation,
+  externalEventId: string,
 ): Promise<ImportPersistPlan> => {
   const db = getDb();
-  const importId = stableImportId(telegramUpdateId);
+  const importId = stableImportId(conversation.platform, externalEventId);
   const skus = rows.map((row) => row.sku);
 
   const existingProducts = skus.length
@@ -263,8 +282,9 @@ export const buildImportPlan = async (
       additionalEstimatedCostMicrosUsd: summary.additionalEstimatedCostMicrosUsd,
       warnings: serializeImportWarningsPayload(warnings, actionableProducts),
       priorityRequestSku: summary.priorityRequestSku,
-      telegramUpdateId,
-      telegramChatId,
+      platform: conversation.platform,
+      conversationId: conversation.conversationId,
+      externalEventId,
     },
     productInserts,
     productUpdates,
@@ -292,8 +312,9 @@ export const persistImportPlan = async (plan: ImportPersistPlan): Promise<void> 
         additional_estimated_cost_micros_usd,
         warnings,
         priority_request_sku,
-        telegram_update_id,
-        telegram_chat_id
+        platform,
+        conversation_id,
+        external_event_id
       ) VALUES (
         ${row.id},
         ${row.filename},
@@ -308,10 +329,11 @@ export const persistImportPlan = async (plan: ImportPersistPlan): Promise<void> 
         ${row.additionalEstimatedCostMicrosUsd},
         ${JSON.stringify(row.warnings)}::jsonb,
         ${row.priorityRequestSku},
-        ${row.telegramUpdateId},
-        ${row.telegramChatId}
+        ${row.platform},
+        ${row.conversationId},
+        ${row.externalEventId}
       )
-      ON CONFLICT (telegram_update_id) DO NOTHING
+      ON CONFLICT (platform, external_event_id) DO NOTHING
     `,
   ];
 
@@ -415,30 +437,36 @@ export const persistImportPlan = async (plan: ImportPersistPlan): Promise<void> 
 export const upsertCatalogAndPlanImport = async (
   rows: CatalogRow[],
   filename: string,
-  telegramChatId: number,
-  telegramUpdateId: number,
+  conversation: ChatConversation,
+  externalEventId: string,
 ): Promise<ImportResult> => {
-  const existing = await findImportByTelegramUpdateId(telegramUpdateId);
+  const existing = await findImportByExternalEvent(
+    conversation.platform,
+    externalEventId,
+  );
   if (existing) {
     return {
       ...importRecordToSummary(existing),
       alreadyProcessed: true,
-      previewMessageId: existing.telegramPreviewMessageId,
+      previewMessageId: existing.previewMessageId,
     };
   }
 
-  const plan = await buildImportPlan(rows, filename, telegramChatId, telegramUpdateId);
+  const plan = await buildImportPlan(rows, filename, conversation, externalEventId);
 
   try {
     await persistImportPlan(plan);
   } catch (error) {
-    if (isTelegramUpdateIdConflict(error)) {
-      const raced = await findImportByTelegramUpdateId(telegramUpdateId);
+    if (isExternalEventConflict(error)) {
+      const raced = await findImportByExternalEvent(
+        conversation.platform,
+        externalEventId,
+      );
       if (raced) {
         return {
           ...importRecordToSummary(raced),
           alreadyProcessed: true,
-          previewMessageId: raced.telegramPreviewMessageId,
+          previewMessageId: raced.previewMessageId,
         };
       }
     }
@@ -451,12 +479,12 @@ export const upsertCatalogAndPlanImport = async (
 
 export const setPreviewMessageId = async (
   importId: string,
-  telegramPreviewMessageId: number,
+  previewMessageId: string,
 ) => {
   const db = getDb();
   await db
     .update(imports)
-    .set({ telegramPreviewMessageId })
+    .set({ previewMessageId })
     .where(eq(imports.id, importId));
 };
 
@@ -486,14 +514,20 @@ export const confirmImport = async (
 };
 
 export const getImportByPreviewMessage = async (
-  chatId: number,
-  messageId: number,
+  conversation: ChatConversation,
+  previewMessageId: string,
 ) => {
   const db = getDb();
   const rows = await db
     .select()
     .from(imports)
-    .where(and(eq(imports.telegramChatId, chatId), eq(imports.telegramPreviewMessageId, messageId)))
+    .where(
+      and(
+        eq(imports.platform, conversation.platform),
+        eq(imports.conversationId, conversation.conversationId),
+        eq(imports.previewMessageId, previewMessageId),
+      ),
+    )
     .limit(1);
 
   return rows[0] ?? null;
@@ -603,12 +637,17 @@ export const deleteImportArtifacts = async (importId: string, skus: string[]) =>
   await db.delete(imports).where(eq(imports.id, importId));
 };
 
-export const countImportsByTelegramUpdateId = async (telegramUpdateId: number): Promise<number> => {
+export const countImportsByExternalEvent = async (
+  platform: ChatPlatform,
+  externalEventId: string,
+): Promise<number> => {
   const db = getDb();
   const rows = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(imports)
-    .where(eq(imports.telegramUpdateId, telegramUpdateId));
+    .where(
+      and(eq(imports.platform, platform), eq(imports.externalEventId, externalEventId)),
+    );
 
   return rows[0]?.count ?? 0;
 };

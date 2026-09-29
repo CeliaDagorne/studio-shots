@@ -5,6 +5,12 @@ import { resolvePublicAssetUrl } from "@/lib/assets";
 import { downloadAndStoreCandidateImage } from "@/lib/blob";
 import { runCandidateImagePipeline } from "@/lib/candidate-pipeline";
 import { buildCampaignPageUrl } from "@/lib/campaigns";
+import {
+  type ChatConversation,
+  parseTelegramMessageId,
+  requireTelegramConversation,
+  toExternalMessageId,
+} from "@/lib/chat-identity";
 import { getDb } from "@/lib/db";
 import { env } from "@/lib/env";
 import { parseImportWarningsPayload } from "@/lib/import-meta";
@@ -211,14 +217,15 @@ const processOneCandidate = async (params: {
 
 export const runShotRequestGeneration = async (params: {
   shotRequestId: string;
-  chatId: number;
+  conversation: ChatConversation;
   label?: string;
 }): Promise<{ claimed: boolean }> => {
+  const chatId = requireTelegramConversation(params.conversation);
   const claimedRequest = await claimShotRequestForGeneration(params.shotRequestId);
 
   if (!claimedRequest) {
     await sendMessage(
-      params.chatId,
+      chatId,
       "That product is no longer available to generate — it may already be generating, complete, or cancelled.",
     );
     return { claimed: false };
@@ -255,7 +262,8 @@ export const runShotRequestGeneration = async (params: {
         candidateIndex,
         status: CANDIDATE_STATUS.pending,
         prompt,
-        telegramChatId: params.chatId,
+        platform: params.conversation.platform,
+        conversationId: params.conversation.conversationId,
       };
     });
 
@@ -264,7 +272,7 @@ export const runShotRequestGeneration = async (params: {
     }
 
     await sendMessage(
-      params.chatId,
+      chatId,
       `Generating 3 ${claimedRequest.productSku} candidates with image_ref at 3:2 (~$0.13). I'll send each photo when ready.`,
     );
 
@@ -291,7 +299,7 @@ export const runShotRequestGeneration = async (params: {
     for (const candidate of ready) {
       if (!candidate.blobUrl) continue;
       const message = await sendPhoto(
-        params.chatId,
+        chatId,
         candidate.blobUrl,
         candidateCaption({
           sku: candidate.productSku,
@@ -303,7 +311,7 @@ export const runShotRequestGeneration = async (params: {
       await db
         .update(generationCandidates)
         .set({
-          telegramMessageId: message.message_id,
+          externalMessageId: toExternalMessageId(message.message_id),
           updatedAt: now(),
         })
         .where(eq(generationCandidates.id, candidate.id));
@@ -312,7 +320,7 @@ export const runShotRequestGeneration = async (params: {
     if (ready.length === 0) {
       await markRequestStatus(shotRequestId, WORKFLOW.failed);
       await sendMessage(
-        params.chatId,
+        chatId,
         `Generation failed for ${claimedRequest.productSku}: all ${PRIORITY_CANDIDATE_COUNT} candidates failed.${
           failed[0]?.errorMessage ? ` First error: ${failed[0].errorMessage}` : ""
         }`,
@@ -324,12 +332,12 @@ export const runShotRequestGeneration = async (params: {
 
     if (failed.length > 0) {
       await sendMessage(
-        params.chatId,
+        chatId,
         `${claimedRequest.productSku}: ${ready.length} candidate(s) ready for review, ${failed.length} failed. Review the photos above; the request will resolve after every available candidate is approved or rejected.`,
       );
     } else {
       await sendMessage(
-        params.chatId,
+        chatId,
         `${claimedRequest.productSku}: all ${ready.length} candidates are ready. Approve or reject each photo. Done requires at least 2 approvals.`,
       );
     }
@@ -338,7 +346,7 @@ export const runShotRequestGeneration = async (params: {
     const message = error instanceof Error ? error.message : "Unknown generation failure";
     await ensureRequestLeavesGenerating(shotRequestId, WORKFLOW.failed);
     await sendMessage(
-      params.chatId,
+      chatId,
       `Generation crashed for ${label} (request ${shotRequestId}): ${message}`,
     );
     return { claimed: true };
@@ -347,12 +355,13 @@ export const runShotRequestGeneration = async (params: {
 
 export const runPriorityGeneration = async (params: {
   importId: string;
-  chatId: number;
+  conversation: ChatConversation;
 }): Promise<void> => {
+  const chatId = requireTelegramConversation(params.conversation);
   const request = await findActionablePriorityRequest(params.importId);
   if (!request) {
     await sendMessage(
-      params.chatId,
+      chatId,
       "Priority generation was skipped — no actionable priority request, or it was already claimed.",
     );
     return;
@@ -360,27 +369,29 @@ export const runPriorityGeneration = async (params: {
 
   await runShotRequestGeneration({
     shotRequestId: request.id,
-    chatId: params.chatId,
+    conversation: params.conversation,
     label: `priority ${request.productSku}`,
   });
 };
 
 export const runSelectedRequestGeneration = async (params: {
   shotRequestId: string;
-  chatId: number;
+  conversation: ChatConversation;
 }): Promise<void> => {
   await runShotRequestGeneration({
     shotRequestId: params.shotRequestId,
-    chatId: params.chatId,
+    conversation: params.conversation,
   });
 };
 
 export const applyCandidateReview = async (params: {
   candidateId: string;
   decision: "approved" | "rejected";
-  chatId: number;
-  messageId: number;
+  conversation: ChatConversation;
+  externalMessageId: string;
 }): Promise<{ alreadyReviewed: boolean; requestStatus: string | null }> => {
+  const chatId = requireTelegramConversation(params.conversation);
+  const messageId = parseTelegramMessageId(params.externalMessageId);
   const db = getDb();
   const decision =
     params.decision === "approved" ? REVIEW_DECISION.approved : REVIEW_DECISION.rejected;
@@ -417,8 +428,8 @@ export const applyCandidateReview = async (params: {
   const alreadyReviewed = updated.length === 0;
 
   await editMessageCaption(
-    params.chatId,
-    params.messageId,
+    chatId,
+    messageId,
     candidateCaption({
       sku: candidate.productSku,
       index: candidate.candidateIndex,
@@ -453,7 +464,7 @@ export const applyCandidateReview = async (params: {
     const importId = requestRows[0]?.importId ?? null;
 
     await sendMessage(
-      params.chatId,
+      chatId,
       formatApprovalCompletionMessage({
         sku: candidate.productSku,
         approvedCount: resolution.approvedCount,
@@ -463,7 +474,7 @@ export const applyCandidateReview = async (params: {
     );
   } else {
     await sendMessage(
-      params.chatId,
+      chatId,
       `${candidate.productSku} needs regeneration (${resolution.approvedCount} approvals; need at least 2).`,
     );
   }
