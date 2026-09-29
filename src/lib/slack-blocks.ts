@@ -8,6 +8,7 @@ import {
   IMPORT_UP_TO_DATE_MESSAGE,
   MVP_ASPECT_RATIO,
 } from "@/lib/request-planning";
+import { candidateCaption } from "@/lib/review";
 import type { ActionableProductOption, RequestPlanSummary } from "@/types";
 
 export type SlackBlock = Record<string, unknown>;
@@ -21,6 +22,8 @@ export const SLACK_ACTION_IDS = {
   gen: "ss_imp_gen",
   page: "ss_imp_page",
   back: "ss_imp_back",
+  approve: "ss_cand_approve",
+  reject: "ss_cand_reject",
 } as const;
 
 const VALUE_SEP = "::";
@@ -370,3 +373,70 @@ export const buildSlackGenerationStartedBlocks = (
     ],
   },
 ];
+
+export const encodeSlackCandidateValue = (candidateId: string): string => candidateId;
+
+export const buildSlackCandidateBlocks = (params: {
+  caption: string;
+  blobUrl: string;
+  candidateId: string;
+  sku: string;
+  candidateIndex: number;
+  total: number;
+  reviewDecision?: string | null;
+}): { text: string; blocks: SlackBlock[] } => {
+  const statusLine =
+    params.reviewDecision === "approved"
+      ? "*Status: Approved*"
+      : params.reviewDecision === "rejected"
+        ? "*Status: Rejected*"
+        : "Review this candidate independently.";
+
+  const text =
+    params.reviewDecision === "approved" || params.reviewDecision === "rejected"
+      ? candidateCaption({
+          sku: params.sku,
+          index: params.candidateIndex,
+          total: params.total,
+          reviewDecision: params.reviewDecision,
+        })
+      : params.caption;
+
+  const blocks: SlackBlock[] = [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*${params.sku}* · candidate ${params.candidateIndex}/${params.total}\n${statusLine}`,
+      },
+    },
+    {
+      type: "image",
+      image_url: params.blobUrl,
+      alt_text: `${params.sku} candidate ${params.candidateIndex}`,
+    },
+  ];
+
+  if (!params.reviewDecision) {
+    blocks.push({
+      type: "actions",
+      block_id: `ss_cand_actions:${params.candidateId}`,
+      elements: [
+        button({
+          actionId: SLACK_ACTION_IDS.approve,
+          text: "Approve",
+          value: encodeSlackCandidateValue(params.candidateId),
+          style: "primary",
+        }),
+        button({
+          actionId: SLACK_ACTION_IDS.reject,
+          text: "Reject",
+          value: encodeSlackCandidateValue(params.candidateId),
+          style: "danger",
+        }),
+      ],
+    });
+  }
+
+  return { text, blocks };
+};

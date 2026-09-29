@@ -5,7 +5,8 @@ import {
   toExternalMessageId,
   type ChatConversation,
 } from "@/lib/chat-identity";
-import type { SlackBlock } from "@/lib/slack-blocks";
+import { PRIORITY_CANDIDATE_COUNT } from "@/lib/review";
+import { buildSlackCandidateBlocks } from "@/lib/slack-blocks";
 import { postSlackMessage } from "@/lib/slack";
 import {
   reviewCandidateKeyboard,
@@ -33,14 +34,15 @@ export const notifyConversation = async (
 };
 
 /**
- * Deliver a ready candidate image. Telegram includes live review keyboards;
- * Slack shows visual review placeholders only (actions wired in a later commit).
+ * Deliver a ready candidate image with platform-appropriate review controls.
  */
 export const deliverCandidateImage = async (params: {
   conversation: ChatConversation;
   blobUrl: string;
   caption: string;
   candidateId: string;
+  sku: string;
+  candidateIndex: number;
 }): Promise<{ externalMessageId: string | null }> => {
   if (params.conversation.platform === CHAT_PLATFORM.telegram) {
     const message = await sendPhoto(
@@ -53,30 +55,18 @@ export const deliverCandidateImage = async (params: {
   }
 
   if (params.conversation.platform === CHAT_PLATFORM.slack) {
-    const blocks: SlackBlock[] = [
-      {
-        type: "section",
-        text: { type: "mrkdwn", text: params.caption },
-      },
-      {
-        type: "image",
-        image_url: params.blobUrl,
-        alt_text: params.caption.slice(0, 100),
-      },
-      {
-        type: "context",
-        elements: [
-          {
-            type: "mrkdwn",
-            text: "_Approve_ / _Reject_ controls coming soon — review stays in Telegram for now.",
-          },
-        ],
-      },
-    ];
+    const built = buildSlackCandidateBlocks({
+      caption: params.caption,
+      blobUrl: params.blobUrl,
+      candidateId: params.candidateId,
+      sku: params.sku,
+      candidateIndex: params.candidateIndex,
+      total: PRIORITY_CANDIDATE_COUNT,
+    });
     const posted = await postSlackMessage({
       channel: requireSlackConversation(params.conversation),
-      text: params.caption,
-      blocks,
+      text: built.text,
+      blocks: built.blocks,
     });
     return { externalMessageId: posted.ts ?? null };
   }

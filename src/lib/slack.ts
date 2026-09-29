@@ -64,7 +64,7 @@ export const slackHelpMessage = (appUrl?: string): string => {
     "- Attach one CSV and mention @Studio Shots with `import`",
     "- Review the preview, then generate the priority product or choose another SKU",
     "",
-    "Candidate review (approve/reject) still runs in Telegram for now.",
+    "Candidate review: Approve or Reject each generated shot in this channel.",
     "",
     "Team visibility:",
     "- Public product pages for approved shots",

@@ -2,10 +2,13 @@ import { buildCampaignPageUrl } from "@/lib/campaigns";
 import { CHAT_PLATFORM, slackConversation } from "@/lib/chat-identity";
 import { env } from "@/lib/env";
 import {
+  getCandidateById,
   getShotRequestById,
+  persistCandidateReview,
   runPriorityGeneration,
   runSelectedRequestGeneration,
 } from "@/lib/generation";
+import { notifyConversation } from "@/lib/generation-delivery";
 import {
   getImportById,
   importRecordToSummary,
@@ -13,13 +16,19 @@ import {
   loadStillActionableProductsForImport,
 } from "@/lib/imports";
 import {
+  buildProductPageUrl,
+  formatApprovalCompletionMessage,
+} from "@/lib/products";
+import {
   evaluateProductSelection,
   selectionErrorMessage,
 } from "@/lib/product-selection";
-import type { ImportRow, ShotRequestRow } from "@/lib/schema";
+import { CANDIDATE_STATUS, PRIORITY_CANDIDATE_COUNT, REVIEW_DECISION, WORKFLOW } from "@/lib/review";
+import type { GenerationCandidateRow, ImportRow, ShotRequestRow } from "@/lib/schema";
 import { isAllowedSlackChannel, isAllowedSlackTeam } from "@/lib/slack";
 import {
   buildSlackCancelledPreviewBlocks,
+  buildSlackCandidateBlocks,
   buildSlackGenerationStartedBlocks,
   buildSlackImportPreviewBlocks,
   buildSlackImportPreviewFallbackText,
@@ -72,8 +81,11 @@ export type SlackActionDeps = {
   getShotRequestById?: (
     shotRequestId: string,
   ) => Promise<Pick<ShotRequestRow, "id" | "productSku" | "workflowStatus"> | null>;
+  getCandidateById?: (candidateId: string) => Promise<GenerationCandidateRow | null>;
+  persistCandidateReview?: typeof persistCandidateReview;
   runPriorityGeneration?: typeof runPriorityGeneration;
   runSelectedRequestGeneration?: typeof runSelectedRequestGeneration;
+  notifyConversation?: typeof notifyConversation;
   claimAction?: typeof claimSlackEventId;
   appUrl?: string;
   isAllowedTeam?: (teamId: string) => boolean;
@@ -89,6 +101,12 @@ export const SLACK_INTERACTION_MESSAGES = {
   duplicateAction: "That action was already handled.",
   noPriority: "No priority product is available to generate.",
   cancelled: "Cancelled. No generation was started.",
+  missingCandidate: "That candidate could not be found.",
+  staleCandidate: "That candidate is no longer available for review.",
+  wrongCandidateConversation: "That candidate does not belong to this channel.",
+  alreadyApproved: "This candidate was already approved.",
+  alreadyRejected: "This candidate was already rejected.",
+  conflictingDecision: "This candidate already has a different review decision.",
 } as const;
 
 /** Extract the JSON `payload` field from Slack's form-encoded interaction body. */
@@ -123,8 +141,11 @@ export const handleSlackBlockAction = async (
   const loadStillActionable =
     deps.loadStillActionableProductsForImport ?? loadStillActionableProductsForImport;
   const getShotRequest = deps.getShotRequestById ?? getShotRequestById;
+  const getCandidate = deps.getCandidateById ?? getCandidateById;
+  const persistReview = deps.persistCandidateReview ?? persistCandidateReview;
   const runPriority = deps.runPriorityGeneration ?? runPriorityGeneration;
   const runSelected = deps.runSelectedRequestGeneration ?? runSelectedRequestGeneration;
+  const notify = deps.notifyConversation ?? notifyConversation;
   const claimAction = deps.claimAction ?? claimSlackEventId;
   const appUrl = deps.appUrl ?? env.appUrl;
   const allowTeam = deps.isAllowedTeam ?? isAllowedSlackTeam;
@@ -334,6 +355,137 @@ export const handleSlackBlockAction = async (
           conversation,
         });
       },
+    };
+  }
+
+  if (
+    action.action_id === SLACK_ACTION_IDS.approve ||
+    action.action_id === SLACK_ACTION_IDS.reject
+  ) {
+    const decision =
+      action.action_id === SLACK_ACTION_IDS.approve ? "approved" : "rejected";
+    const candidateId = action.value;
+    const candidate = await getCandidate(candidateId);
+
+    if (!candidate) {
+      return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.missingCandidate) };
+    }
+    if (candidate.platform !== CHAT_PLATFORM.slack) {
+      return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.staleCandidate) };
+    }
+    if (candidate.conversationId !== channelId) {
+      return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.wrongCandidateConversation) };
+    }
+    if (candidate.status !== CANDIDATE_STATUS.ready || !candidate.blobUrl) {
+      return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.staleCandidate) };
+    }
+
+    const messageTs = payload.message?.ts;
+    if (
+      candidate.externalMessageId &&
+      messageTs &&
+      candidate.externalMessageId !== messageTs
+    ) {
+      return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.staleCandidate) };
+    }
+
+    if (candidate.reviewDecision) {
+      if (candidate.reviewDecision === decision) {
+        const built = buildSlackCandidateBlocks({
+          caption: "",
+          blobUrl: candidate.blobUrl,
+          candidateId: candidate.id,
+          sku: candidate.productSku,
+          candidateIndex: candidate.candidateIndex,
+          total: PRIORITY_CANDIDATE_COUNT,
+          reviewDecision: candidate.reviewDecision,
+        });
+        return {
+          httpBody: {
+            replace_original: true,
+            text: built.text,
+            blocks: built.blocks,
+          },
+        };
+      }
+      return {
+        httpBody: ephemeral(
+          candidate.reviewDecision === REVIEW_DECISION.approved
+            ? SLACK_INTERACTION_MESSAGES.alreadyApproved
+            : candidate.reviewDecision === REVIEW_DECISION.rejected
+              ? SLACK_INTERACTION_MESSAGES.alreadyRejected
+              : SLACK_INTERACTION_MESSAGES.conflictingDecision,
+        ),
+      };
+    }
+
+    const persisted = await persistReview({
+      candidateId: candidate.id,
+      decision,
+    });
+
+    if (!persisted.candidate?.blobUrl) {
+      return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.missingCandidate) };
+    }
+
+    if (
+      persisted.alreadyReviewed &&
+      persisted.existingDecision &&
+      persisted.existingDecision !== decision
+    ) {
+      return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.conflictingDecision) };
+    }
+
+    const finalDecision = persisted.candidate.reviewDecision ?? decision;
+    const built = buildSlackCandidateBlocks({
+      caption: "",
+      blobUrl: persisted.candidate.blobUrl,
+      candidateId: persisted.candidate.id,
+      sku: persisted.candidate.productSku,
+      candidateIndex: persisted.candidate.candidateIndex,
+      total: PRIORITY_CANDIDATE_COUNT,
+      reviewDecision: finalDecision,
+    });
+
+    return {
+      httpBody: {
+        replace_original: true,
+        text: built.text,
+        blocks: built.blocks,
+      },
+      background:
+        persisted.newlyResolved && persisted.requestStatus
+          ? async () => {
+              if (
+                persisted.requestStatus === WORKFLOW.approved &&
+                persisted.approvedCount !== null &&
+                persisted.candidate
+              ) {
+                await notify(
+                  conversation,
+                  formatApprovalCompletionMessage({
+                    sku: persisted.candidate.productSku,
+                    approvedCount: persisted.approvedCount,
+                    productPageUrl: buildProductPageUrl(
+                      appUrl,
+                      persisted.candidate.productSku,
+                    ),
+                    campaignPageUrl: persisted.importId
+                      ? buildCampaignPageUrl(appUrl, persisted.importId)
+                      : null,
+                  }),
+                );
+              } else if (
+                persisted.requestStatus === WORKFLOW.needsRegeneration &&
+                persisted.candidate
+              ) {
+                await notify(
+                  conversation,
+                  `${persisted.candidate.productSku} needs regeneration (${persisted.approvedCount ?? 0} approvals; need at least 2).`,
+                );
+              }
+            }
+          : undefined,
     };
   }
 

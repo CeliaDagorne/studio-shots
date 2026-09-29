@@ -128,6 +128,16 @@ export const getShotRequestById = async (shotRequestId: string) => {
   return rows[0] ?? null;
 };
 
+export const getCandidateById = async (candidateId: string) => {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(generationCandidates)
+    .where(eq(generationCandidates.id, candidateId))
+    .limit(1);
+  return rows[0] ?? null;
+};
+
 const markRequestStatus = async (shotRequestId: string, workflowStatus: string, approvedCount?: number) => {
   const db = getDb();
   await db
@@ -304,6 +314,8 @@ export const runShotRequestGeneration = async (params: {
           total: PRIORITY_CANDIDATE_COUNT,
         }),
         candidateId: candidate.id,
+        sku: candidate.productSku,
+        candidateIndex: candidate.candidateIndex,
       });
       if (delivered.externalMessageId) {
         await db
@@ -382,14 +394,25 @@ export const runSelectedRequestGeneration = async (params: {
   });
 };
 
-export const applyCandidateReview = async (params: {
+export type PersistCandidateReviewResult = {
+  alreadyReviewed: boolean;
+  candidate: typeof generationCandidates.$inferSelect | null;
+  existingDecision: string | null;
+  requestStatus: string | null;
+  approvedCount: number | null;
+  importId: string | null;
+  /** True when this call newly recorded a decision and advanced the request. */
+  newlyResolved: boolean;
+};
+
+/**
+ * Shared approve/reject persistence used by Telegram and Slack.
+ * Atomic on `review_decision IS NULL` so duplicate clicks stay idempotent.
+ */
+export const persistCandidateReview = async (params: {
   candidateId: string;
   decision: "approved" | "rejected";
-  conversation: ChatConversation;
-  externalMessageId: string;
-}): Promise<{ alreadyReviewed: boolean; requestStatus: string | null }> => {
-  const chatId = requireTelegramConversation(params.conversation);
-  const messageId = parseTelegramMessageId(params.externalMessageId);
+}): Promise<PersistCandidateReviewResult> => {
   const db = getDb();
   const decision =
     params.decision === "approved" ? REVIEW_DECISION.approved : REVIEW_DECISION.rejected;
@@ -420,22 +443,19 @@ export const applyCandidateReview = async (params: {
     )[0];
 
   if (!candidate) {
-    return { alreadyReviewed: true, requestStatus: null };
+    return {
+      alreadyReviewed: true,
+      candidate: null,
+      existingDecision: null,
+      requestStatus: null,
+      approvedCount: null,
+      importId: null,
+      newlyResolved: false,
+    };
   }
 
   const alreadyReviewed = updated.length === 0;
-
-  await editMessageCaption(
-    chatId,
-    messageId,
-    candidateCaption({
-      sku: candidate.productSku,
-      index: candidate.candidateIndex,
-      total: PRIORITY_CANDIDATE_COUNT,
-      reviewDecision: candidate.reviewDecision ?? decision,
-    }),
-    removeInlineKeyboard(),
-  );
+  const existingDecision = candidate.reviewDecision ?? null;
 
   const siblings = await db
     .select()
@@ -443,8 +463,30 @@ export const applyCandidateReview = async (params: {
     .where(eq(generationCandidates.shotRequestId, candidate.shotRequestId));
 
   const resolution = resolveRequestAfterReviews(siblings);
+
+  if (alreadyReviewed) {
+    return {
+      alreadyReviewed: true,
+      candidate,
+      existingDecision,
+      requestStatus: resolution.status,
+      approvedCount:
+        resolution.status === WORKFLOW.awaitingReview ? null : resolution.approvedCount,
+      importId: null,
+      newlyResolved: false,
+    };
+  }
+
   if (resolution.status === WORKFLOW.awaitingReview) {
-    return { alreadyReviewed, requestStatus: WORKFLOW.awaitingReview };
+    return {
+      alreadyReviewed: false,
+      candidate,
+      existingDecision: decision,
+      requestStatus: WORKFLOW.awaitingReview,
+      approvedCount: null,
+      importId: null,
+      newlyResolved: false,
+    };
   }
 
   await markRequestStatus(
@@ -453,29 +495,85 @@ export const applyCandidateReview = async (params: {
     resolution.approvedCount,
   );
 
-  if (resolution.status === WORKFLOW.approved) {
-    const requestRows = await db
-      .select({ importId: shotRequests.importId })
-      .from(shotRequests)
-      .where(eq(shotRequests.id, candidate.shotRequestId))
-      .limit(1);
-    const importId = requestRows[0]?.importId ?? null;
+  const requestRows = await db
+    .select({ importId: shotRequests.importId })
+    .from(shotRequests)
+    .where(eq(shotRequests.id, candidate.shotRequestId))
+    .limit(1);
 
+  return {
+    alreadyReviewed: false,
+    candidate,
+    existingDecision: decision,
+    requestStatus: resolution.status,
+    approvedCount: resolution.approvedCount,
+    importId: requestRows[0]?.importId ?? null,
+    newlyResolved: true,
+  };
+};
+
+export const applyCandidateReview = async (params: {
+  candidateId: string;
+  decision: "approved" | "rejected";
+  conversation: ChatConversation;
+  externalMessageId: string;
+}): Promise<{ alreadyReviewed: boolean; requestStatus: string | null }> => {
+  const chatId = requireTelegramConversation(params.conversation);
+  const messageId = parseTelegramMessageId(params.externalMessageId);
+
+  const persisted = await persistCandidateReview({
+    candidateId: params.candidateId,
+    decision: params.decision,
+  });
+
+  if (!persisted.candidate) {
+    return { alreadyReviewed: true, requestStatus: null };
+  }
+
+  const displayDecision =
+    persisted.candidate.reviewDecision ??
+    (params.decision === "approved" ? REVIEW_DECISION.approved : REVIEW_DECISION.rejected);
+
+  await editMessageCaption(
+    chatId,
+    messageId,
+    candidateCaption({
+      sku: persisted.candidate.productSku,
+      index: persisted.candidate.candidateIndex,
+      total: PRIORITY_CANDIDATE_COUNT,
+      reviewDecision: displayDecision,
+    }),
+    removeInlineKeyboard(),
+  );
+
+  if (persisted.alreadyReviewed || !persisted.newlyResolved || !persisted.requestStatus) {
+    return {
+      alreadyReviewed: persisted.alreadyReviewed,
+      requestStatus: persisted.requestStatus,
+    };
+  }
+
+  if (persisted.requestStatus === WORKFLOW.approved && persisted.approvedCount !== null) {
     await sendMessage(
       chatId,
       formatApprovalCompletionMessage({
-        sku: candidate.productSku,
-        approvedCount: resolution.approvedCount,
-        productPageUrl: buildProductPageUrl(env.appUrl, candidate.productSku),
-        campaignPageUrl: importId ? buildCampaignPageUrl(env.appUrl, importId) : null,
+        sku: persisted.candidate.productSku,
+        approvedCount: persisted.approvedCount,
+        productPageUrl: buildProductPageUrl(env.appUrl, persisted.candidate.productSku),
+        campaignPageUrl: persisted.importId
+          ? buildCampaignPageUrl(env.appUrl, persisted.importId)
+          : null,
       }),
     );
-  } else {
+  } else if (persisted.requestStatus === WORKFLOW.needsRegeneration) {
     await sendMessage(
       chatId,
-      `${candidate.productSku} needs regeneration (${resolution.approvedCount} approvals; need at least 2).`,
+      `${persisted.candidate.productSku} needs regeneration (${persisted.approvedCount ?? 0} approvals; need at least 2).`,
     );
   }
 
-  return { alreadyReviewed, requestStatus: resolution.status };
+  return {
+    alreadyReviewed: false,
+    requestStatus: persisted.requestStatus,
+  };
 };
