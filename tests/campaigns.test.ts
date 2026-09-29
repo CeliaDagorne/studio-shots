@@ -7,6 +7,7 @@ import {
   buildCampaignPagePath,
   buildCampaignPageUrl,
   buildCampaignProductCards,
+  formatCampaignImportedAt,
   formatWorkflowStatusLabel,
   mapStudioStatusToCampaignTotals,
 } from "@/lib/campaigns";
@@ -175,6 +176,15 @@ test("empty campaign still has zeroed totals and no product cards", () => {
   assert.equal(page.totals.totalProducts, 0);
   assert.equal(page.totals.actionableProducts, 0);
   assert.deepEqual(page.products, []);
+  assert.equal(page.importedAtLabel, "September 28, 2026");
+  assert.doesNotMatch(page.importedAtLabel, /UTC|\d:\d{2}/);
+});
+
+test("formatCampaignImportedAt uses a plain calendar date", () => {
+  assert.equal(
+    formatCampaignImportedAt(new Date("2026-09-29T14:37:00.000Z")),
+    "September 29, 2026",
+  );
 });
 
 test("homepage demo catalog is available without database campaign data", () => {

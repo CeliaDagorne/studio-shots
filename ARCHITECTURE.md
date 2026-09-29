@@ -92,9 +92,9 @@ Both adapters invoke the same planning (`imports.ts` / request planning), genera
 
 ## Public site
 
-- `/` — Slack-primary product story, four-step workflow, demo catalog, GitHub/docs links, and a link to the latest campaign when one exists (works with no imports yet). Telegram is noted as also supported.
-- `/campaigns/[importId]` — read-only campaign totals and product grid (priority, status, approved counts, product links).
-- `/products/[sku]` — metadata, original catalog photo, approved styled shots + downloads.
+- `/`: Slack-primary product story, four-step workflow, demo catalog, GitHub/docs links, and a link to the latest campaign when one exists (works with no imports yet). Telegram is noted as also supported.
+- `/campaigns/[importId]`: read-only campaign totals and product grid (priority, status, approved counts, product links).
+- `/products/[sku]`: metadata, original catalog photo, approved styled shots + downloads.
 - Unknown campaigns/SKUs → not-found; products with no approvals → empty gallery state.
 - Generation and review actions stay in chat; the website never exposes secrets or provider IDs.
 

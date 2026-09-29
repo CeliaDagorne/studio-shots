@@ -4,7 +4,7 @@ Product and engineering choices behind Studio Shots.
 
 ## Chat surface: Slack-primary, Telegram secondary
 
-**Decision:** Ship import, generation, and review through chat adapters — primarily Slack — with Telegram as a supported secondary channel. Do not build a web dashboard for generation or review.
+**Decision:** Ship import, generation, and review through chat adapters, primarily Slack, with Telegram as a supported secondary channel. Do not build a web dashboard for generation or review.
 
 **Why:** Reviewers already work in team chat. Slack is where most catalog and e-commerce teams collaborate; Telegram remains useful for lightweight or phone-first deployments. A new admin UI would fight adoption without improving the review loop.
 
@@ -52,7 +52,7 @@ Product and engineering choices behind Studio Shots.
 
 ## Status in chat, plus a read-only web overview
 
-**Decision:** Operators get progress from chat (Slack completion / campaign links; Telegram `/status`) and a public `/campaigns/[importId]` page that mirrors the same aggregates — without web generation or review actions.
+**Decision:** Operators get progress from chat (Slack completion / campaign links; Telegram `/status`) and a public `/campaigns/[importId]` page that mirrors the same aggregates, without web generation or review actions.
 
 **Why:** Visibility without interrupting reviewers or inventing another login. Chat remains the control surface; the website stays read-only.
 

@@ -2,19 +2,19 @@
 
 **Live site:** [https://studio-shots.vercel.app](https://studio-shots.vercel.app)
 
-Chat-first styled product photography for catalog teams — primarily used through **Slack**. Telegram is also supported as a secondary chat adapter.
+Chat-first styled product photography for catalog teams, primarily used through **Slack**. Telegram is also supported as a secondary chat adapter.
 
 Import a product CSV in Slack, preview costs, generate lifestyle candidates with [Luma](https://lumalabs.ai) (one product at a time), approve or reject each shot in your team’s channel, and publish approved images on public product pages. A read-only web campaign overview tracks progress after each import.
 
 ## What it does (Slack)
 
-1. **Import** — Attach a catalog CSV in the authorized Slack channel and mention `@Studio Shots` with `import`. Studio Shots replies with a Block Kit cost preview before any paid generation.
-2. **Select** — Use **Generate priority** for the top SKU, or **Choose a product** for any other actionable SKU.
-3. **Generate** — Confirm generation for one product at a time (spend stays controlled).
-4. **Review** — Approve or Reject each candidate independently in the channel.
-5. **Campaign** — After import, Studio Shots shares a link to `/campaigns/[importId]`. Approved images also appear on `/products/[sku]` with download links.
+1. **Import**: Attach a catalog CSV in the authorized Slack channel and mention `@Studio Shots` with `import`. Studio Shots replies with a Block Kit cost preview before any paid generation.
+2. **Select**: Use **Generate priority** for the top SKU, or **Choose a product** for any other actionable SKU.
+3. **Generate**: Confirm generation for one product at a time (spend stays controlled).
+4. **Review**: Approve or Reject each candidate independently in the channel.
+5. **Campaign**: After import, Studio Shots shares a link to `/campaigns/[importId]`. Approved images also appear on `/products/[sku]` with download links.
 
-Telegram exposes the same shared services with `/import`, inline keyboards, and `/status` — see [Telegram setup](#telegram-setup-secondary) below.
+Telegram exposes the same shared services with `/import`, inline keyboards, and `/status`; see [Telegram setup](#telegram-setup-secondary) below.
 
 ## Intentional v1 limits
 
@@ -23,7 +23,7 @@ Telegram exposes the same shared services with `/import`, inline keyboards, and 
 - Luma as the image-generation provider (`image_ref`, `uni-1`, `3:2`)
 - Fixed candidate count (three per request); at least two approvals to mark a product done
 - Fixed per-image cost estimate constant (see [ARCHITECTURE.md](ARCHITECTURE.md))
-- One product generating at a time — no batch / generate-all
+- One product generating at a time; no batch / generate-all
 - No Slack Marketplace distribution and no multi-tenant / multi-workspace support
 - No CMS auto-upload and no automatic regeneration
 
@@ -61,7 +61,7 @@ Photo paths are root-relative (`/demo/...`) and resolved against `APP_URL` when 
 
 ## Setup (fresh deployment)
 
-Use **new** Vercel, Neon, Slack app, and Blob credentials—do not reuse another project’s secrets. Telegram is optional for a Slack-only deploy, but the current runtime still expects Telegram env vars to be set (see `.env.example`).
+Use **new** Vercel, Neon, Slack app, and Blob credentials; do not reuse another project’s secrets. Telegram is optional for a Slack-only deploy, but the current runtime still expects Telegram env vars to be set (see `.env.example`).
 
 1. Copy [`.env.example`](.env.example) → `.env.local` and fill in values.
 2. `npm install`
@@ -122,8 +122,8 @@ npm run webhook:info
 
 ## Docs
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — system flow, adapters, and key mechanics
-- [DECISIONS.md](DECISIONS.md) — product and engineering choices
+- [ARCHITECTURE.md](ARCHITECTURE.md): system flow, adapters, and key mechanics
+- [DECISIONS.md](DECISIONS.md): product and engineering choices
 
 ## License
 

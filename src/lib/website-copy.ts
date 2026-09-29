@@ -11,7 +11,7 @@ export const HOME_EMPTY_CAMPAIGN =
   "No campaign imported yet. Upload a catalog CSV in Slack and mention @Studio Shots with import to create one.";
 
 export const HOME_LATEST_CAMPAIGN_SUFFIX =
-  "Generation and review stay in Slack—this site is read-only.";
+  "Generation and review stay in Slack. This site is read-only.";
 
 export const HOME_STEPS_INTRO =
   "Four steps from catalog CSV to downloadable approved assets.";
@@ -36,7 +36,7 @@ export const HOME_STEPS = [
 ] as const;
 
 export const CAMPAIGN_PAGE_LEDE_SUFFIX =
-  "This page is read-only—generate and review products in Slack.";
+  "This page is read-only. Generate and review products in Slack.";
 
 export const CAMPAIGN_METRICS_INTRO =
   "Live rollup from the same status rules used in Slack.";

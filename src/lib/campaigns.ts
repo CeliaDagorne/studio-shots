@@ -121,10 +121,11 @@ export const formatWorkflowStatusLabel = (status: string): string => {
 
 export const formatCampaignImportedAt = (date: Date): string =>
   new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
     timeZone: "UTC",
-  }).format(date) + " UTC";
+  }).format(date);
 
 export const mapStudioStatusToCampaignTotals = (
   summary: StudioStatusSummary,

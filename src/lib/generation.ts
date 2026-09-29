@@ -233,7 +233,7 @@ export const runShotRequestGeneration = async (params: {
   if (!claimedRequest) {
     await notifyConversation(
       params.conversation,
-      "That product is no longer available to generate — it may already be generating, complete, or cancelled.",
+      "That product is no longer available to generate. It may already be generating, complete, or cancelled.",
     );
     return { claimed: false };
   }
@@ -372,7 +372,7 @@ export const runPriorityGeneration = async (params: {
   if (!request) {
     await notifyConversation(
       params.conversation,
-      "Priority generation was skipped — no actionable priority request, or it was already claimed.",
+      "Priority generation was skipped. No actionable priority request, or it was already claimed.",
     );
     return;
   }

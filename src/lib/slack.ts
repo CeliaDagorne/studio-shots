@@ -61,7 +61,7 @@ export const isAllowedSlackChannel = (channelId: string): boolean =>
  */
 export const slackHelpMessage = (_appUrl?: string): string =>
   [
-    "*Studio Shots* — styled product photography for catalog teams.",
+    "*Studio Shots* · styled product photography for catalog teams.",
     "",
     "*Import a catalog in this channel:*",
     "• Attach one CSV and mention @Studio Shots with `import`",
