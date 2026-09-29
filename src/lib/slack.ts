@@ -55,27 +55,35 @@ export const isAllowedSlackTeam = (teamId: string): boolean => teamId === env.sl
 export const isAllowedSlackChannel = (channelId: string): boolean =>
   channelId === env.slackChannelId;
 
-export const slackHelpMessage = (appUrl?: string): string => {
-  const base = (appUrl ?? "").replace(/\/+$/, "");
-  const lines = [
-    "Studio Shots — styled product photography for catalog teams.",
+/**
+ * Slack help copy. Uses mrkdwn-friendly bullets and explicit newlines so each
+ * instruction renders on its own line in a section block.
+ */
+export const slackHelpMessage = (_appUrl?: string): string =>
+  [
+    "*Studio Shots* — styled product photography for catalog teams.",
     "",
-    "Import a catalog in this channel:",
-    "- Attach one CSV and mention @Studio Shots with `import`",
-    "- Review the preview, then generate the priority product or choose another SKU",
+    "*Import a catalog in this channel:*",
+    "• Attach one CSV and mention @Studio Shots with `import`",
+    "• Review the preview, then generate the priority product or choose another SKU",
     "",
-    "Candidate review: Approve or Reject each generated shot in this channel.",
+    "*Candidate review:*",
+    "• Approve or Reject each generated shot in this channel",
     "",
-    "Team visibility:",
-    "- Public product pages for approved shots",
-  ];
+    "*Team visibility:*",
+    "• Public product pages for approved shots",
+    "• After import, Studio Shots shares a link to the campaign overview.",
+  ].join("\n");
 
-  if (base) {
-    lines.push(`- Campaign overview pages: ${base}/campaigns/<importId>`);
-  }
-
-  return lines.join("\n");
-};
+export const slackHelpBlocks = (appUrl?: string): SlackBlock[] => [
+  {
+    type: "section",
+    text: {
+      type: "mrkdwn",
+      text: slackHelpMessage(appUrl),
+    },
+  },
+];
 
 type SlackApiResult = {
   ok: boolean;
@@ -162,6 +170,7 @@ export const processSlackEventCallback = async (
   await postSlackMessage({
     channel,
     text: slackHelpMessage(env.appUrl),
+    blocks: slackHelpBlocks(env.appUrl),
   });
 
   return { handled: true, reason: "help" };

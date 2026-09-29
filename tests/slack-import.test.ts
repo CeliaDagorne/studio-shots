@@ -145,6 +145,10 @@ test("successful Slack catalog import posts Block Kit preview via shared plannin
   assert.equal(posts[0]?.channel, "C_ALLOWED");
   assert.match(posts[0]!.text, /Catalog import preview/);
   assert.match(posts[0]!.text, /SS-001/);
+  assert.match(
+    posts[0]!.text,
+    /Campaign overview: https:\/\/studio-shots\.example\/campaigns\/import-slack-1/,
+  );
   assert.ok(Array.isArray(posts[0]?.blocks));
   assert.ok((posts[0]?.blocks?.length ?? 0) > 0);
   const serialized = JSON.stringify(posts[0]?.blocks);
@@ -152,6 +156,11 @@ test("successful Slack catalog import posts Block Kit preview via shared plannin
   assert.match(serialized, /SS-001/);
   assert.match(serialized, /Actionable products/);
   assert.match(serialized, /Campaign overview/);
+  assert.match(
+    serialized,
+    /https:\/\/studio-shots\.example\/campaigns\/import-slack-1/,
+  );
+  assert.doesNotMatch(serialized, /campaigns\/<importId>/);
 });
 
 test("Slack import reports a clear message when the CSV file is missing", async () => {

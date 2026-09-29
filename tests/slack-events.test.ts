@@ -33,13 +33,21 @@ const signedRequest = (rawBody: string, timestamp: string, signature?: string) =
   });
 
 const withMockedSlackPost = async (
-  run: (posts: Array<{ channel: string; text: string }>) => Promise<void>,
+  run: (
+    posts: Array<{ channel: string; text: string; blocks?: unknown[] }>,
+  ) => Promise<void>,
 ) => {
-  const posts: Array<{ channel: string; text: string }> = [];
+  const posts: Array<{ channel: string; text: string; blocks?: unknown[] }> = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (String(input).includes("chat.postMessage")) {
-      posts.push(JSON.parse(String(init?.body ?? "{}")) as { channel: string; text: string });
+      posts.push(
+        JSON.parse(String(init?.body ?? "{}")) as {
+          channel: string;
+          text: string;
+          blocks?: unknown[];
+        },
+      );
       return new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -213,7 +221,9 @@ test("unauthorized channel is acknowledged with a clear refusal message", async 
 });
 
 test("app_mention in the allowlisted channel posts the Studio Shots help message", async () => {
-  const { processSlackEventCallback, slackHelpMessage } = await import("@/lib/slack");
+  const { processSlackEventCallback, slackHelpMessage, slackHelpBlocks } = await import(
+    "@/lib/slack"
+  );
 
   await withMockedSlackPost(async (posts) => {
     const result = await processSlackEventCallback({
@@ -230,5 +240,28 @@ test("app_mention in the allowlisted channel posts the Studio Shots help message
     assert.equal(posts.length, 1);
     assert.equal(posts[0]?.channel, "C_ALLOWED");
     assert.equal(posts[0]?.text, slackHelpMessage(process.env.APP_URL));
+    assert.deepEqual(posts[0]?.blocks, slackHelpBlocks(process.env.APP_URL));
   });
+});
+
+test("Slack help message has no placeholder campaign URL and keeps instructions on separate lines", async () => {
+  const { slackHelpMessage } = await import("@/lib/slack");
+  const help = slackHelpMessage("https://studio-shots.example");
+
+  assert.doesNotMatch(help, /campaigns\/<importId>/);
+  assert.doesNotMatch(help, /https:\/\/studio-shots\.example\/campaigns\//);
+  assert.match(help, /After import, Studio Shots shares a link to the campaign overview\./);
+
+  const lines = help.split("\n");
+  assert.ok(lines.includes("• Attach one CSV and mention @Studio Shots with `import`"));
+  assert.ok(
+    lines.includes(
+      "• Review the preview, then generate the priority product or choose another SKU",
+    ),
+  );
+  assert.ok(lines.includes("• Approve or Reject each generated shot in this channel"));
+  assert.ok(lines.includes("• Public product pages for approved shots"));
+  assert.ok(
+    lines.includes("• After import, Studio Shots shares a link to the campaign overview."),
+  );
 });
