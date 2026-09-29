@@ -108,6 +108,7 @@ export const SLACK_INTERACTION_MESSAGES = {
   alreadyApproved: "This candidate was already approved.",
   alreadyRejected: "This candidate was already rejected.",
   conflictingDecision: "This candidate already has a different review decision.",
+  reviewInProgress: "That review is already being recorded.",
 } as const;
 
 /** Extract the JSON `payload` field from Slack's form-encoded interaction body. */
@@ -420,32 +421,20 @@ export const handleSlackBlockAction = async (
       };
     }
 
-    const persisted = await persistReview({
-      candidateId: candidate.id,
-      decision,
-    });
-
-    if (!persisted.candidate?.blobUrl) {
-      return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.missingCandidate) };
+    // Claim before responding so a second Approve/Reject cannot stay clickable while
+    // the first click's spinner is still showing.
+    if (!claimAction(`slack-review:${candidate.id}`)) {
+      return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.reviewInProgress) };
     }
 
-    if (
-      persisted.alreadyReviewed &&
-      persisted.existingDecision &&
-      persisted.existingDecision !== decision
-    ) {
-      return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.conflictingDecision) };
-    }
-
-    const finalDecision = persisted.candidate.reviewDecision ?? decision;
     const built = buildSlackCandidateBlocks({
       caption: "",
-      blobUrl: persisted.candidate.blobUrl,
-      candidateId: persisted.candidate.id,
-      sku: persisted.candidate.productSku,
-      candidateIndex: persisted.candidate.candidateIndex,
+      blobUrl: candidate.blobUrl,
+      candidateId: candidate.id,
+      sku: candidate.productSku,
+      candidateIndex: candidate.candidateIndex,
       total: PRIORITY_CANDIDATE_COUNT,
-      reviewDecision: finalDecision,
+      reviewDecision: decision,
     });
 
     return {
@@ -454,39 +443,57 @@ export const handleSlackBlockAction = async (
         text: built.text,
         blocks: built.blocks,
       },
-      background:
-        persisted.newlyResolved && persisted.requestStatus
-          ? async () => {
-              if (
-                persisted.requestStatus === WORKFLOW.approved &&
-                persisted.approvedCount !== null &&
-                persisted.candidate
-              ) {
-                await notify(
-                  conversation,
-                  formatApprovalCompletionMessage({
-                    sku: persisted.candidate.productSku,
-                    approvedCount: persisted.approvedCount,
-                    productPageUrl: buildProductPageUrl(
-                      appUrl,
-                      persisted.candidate.productSku,
-                    ),
-                    campaignPageUrl: persisted.importId
-                      ? buildCampaignPageUrl(appUrl, persisted.importId)
-                      : null,
-                  }),
-                );
-              } else if (
-                persisted.requestStatus === WORKFLOW.needsRegeneration &&
-                persisted.candidate
-              ) {
-                await notify(
-                  conversation,
-                  `${persisted.candidate.productSku} needs regeneration (${persisted.approvedCount ?? 0} approvals; need at least 2).`,
-                );
-              }
-            }
-          : undefined,
+      background: async () => {
+        const persisted = await persistReview({
+          candidateId: candidate.id,
+          decision,
+        });
+
+        if (
+          persisted.alreadyReviewed &&
+          persisted.existingDecision &&
+          persisted.existingDecision !== decision
+        ) {
+          console.error(
+            "[slack/review]",
+            `candidate ${candidate.id} already ${persisted.existingDecision}; ignored ${decision}`,
+          );
+          return;
+        }
+
+        if (!persisted.newlyResolved || !persisted.requestStatus) {
+          return;
+        }
+
+        if (
+          persisted.requestStatus === WORKFLOW.approved &&
+          persisted.approvedCount !== null &&
+          persisted.candidate
+        ) {
+          await notify(
+            conversation,
+            formatApprovalCompletionMessage({
+              sku: persisted.candidate.productSku,
+              approvedCount: persisted.approvedCount,
+              productPageUrl: buildProductPageUrl(
+                appUrl,
+                persisted.candidate.productSku,
+              ),
+              campaignPageUrl: persisted.importId
+                ? buildCampaignPageUrl(appUrl, persisted.importId)
+                : null,
+            }),
+          );
+        } else if (
+          persisted.requestStatus === WORKFLOW.needsRegeneration &&
+          persisted.candidate
+        ) {
+          await notify(
+            conversation,
+            `${persisted.candidate.productSku} needs regeneration (${persisted.approvedCount ?? 0} approvals; need at least 2).`,
+          );
+        }
+      },
     };
   }
 

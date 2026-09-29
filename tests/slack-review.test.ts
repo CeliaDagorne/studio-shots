@@ -149,10 +149,21 @@ test("Slack candidate blocks include image, SKU, candidate number, Approve and R
   assert.match(serialized, new RegExp(SLACK_ACTION_IDS.reject));
 });
 
-test("approval persists shared decision and updates Slack message without buttons", async () => {
+test("approval updates Slack message without buttons before persistence finishes", async () => {
   const { handleSlackBlockAction } = await import("@/lib/slack-actions");
   const { SLACK_ACTION_IDS } = await import("@/lib/slack-blocks");
   const ctx = baseDeps();
+  let persistStarted = false;
+  let releasePersist!: () => void;
+  const persistGate = new Promise<void>((resolve) => {
+    releasePersist = resolve;
+  });
+  const originalPersist = ctx.deps.persistCandidateReview!;
+  ctx.deps.persistCandidateReview = async (params) => {
+    persistStarted = true;
+    await persistGate;
+    return originalPersist(params);
+  };
 
   const result = await handleSlackBlockAction(
     blockActionPayload({
@@ -166,10 +177,17 @@ test("approval persists shared decision and updates Slack message without button
   assert.equal(result.httpBody.replace_original, true);
   assert.match(result.httpBody.text ?? "", /Status: Approved/);
   assert.doesNotMatch(JSON.stringify(result.httpBody.blocks), /"text":"Approve"/);
+  assert.doesNotMatch(JSON.stringify(result.httpBody.blocks), /"text":"Reject"/);
+  assert.equal(ctx.candidateRef().reviewDecision, null);
+  assert.ok(result.background);
+
+  releasePersist();
+  await result.background!();
+  assert.equal(persistStarted, true);
   assert.equal(ctx.candidateRef().reviewDecision, "approved");
 });
 
-test("rejection persists shared decision and updates Slack message without buttons", async () => {
+test("rejection updates Slack message without buttons before persistence finishes", async () => {
   const { handleSlackBlockAction } = await import("@/lib/slack-actions");
   const { SLACK_ACTION_IDS } = await import("@/lib/slack-blocks");
   const ctx = baseDeps();
@@ -185,9 +203,11 @@ test("rejection persists shared decision and updates Slack message without butto
 
   assert.equal(result.httpBody.replace_original, true);
   assert.match(result.httpBody.text ?? "", /Status: Rejected/);
+  assert.doesNotMatch(JSON.stringify(result.httpBody.blocks), /"text":"Approve"/);
   assert.doesNotMatch(JSON.stringify(result.httpBody.blocks), /"text":"Reject"/);
+  assert.ok(result.background);
+  await result.background!();
   assert.equal(ctx.candidateRef().reviewDecision, "rejected");
-  assert.equal(result.background, undefined);
 });
 
 test("duplicate review clicks are idempotent and do not re-persist", async () => {
@@ -210,6 +230,9 @@ test("duplicate review clicks are idempotent and do not re-persist", async () =>
     ctx.deps,
   );
   assert.match(first.httpBody.text ?? "", /Approved/);
+  assert.doesNotMatch(JSON.stringify(first.httpBody.blocks), /"text":"Approve"/);
+  assert.ok(first.background);
+  await first.background!();
 
   const second = await handleSlackBlockAction(
     blockActionPayload({
@@ -221,6 +244,49 @@ test("duplicate review clicks are idempotent and do not re-persist", async () =>
   );
   assert.match(second.httpBody.text ?? "", /Approved/);
   assert.equal(persistCalls, 1);
+});
+
+test("a second click while review is in flight is refused without leaving buttons", async () => {
+  const { handleSlackBlockAction, SLACK_INTERACTION_MESSAGES } = await import(
+    "@/lib/slack-actions"
+  );
+  const { SLACK_ACTION_IDS } = await import("@/lib/slack-blocks");
+  const ctx = baseDeps();
+  let releasePersist!: () => void;
+  const persistGate = new Promise<void>((resolve) => {
+    releasePersist = resolve;
+  });
+  const originalPersist = ctx.deps.persistCandidateReview!;
+  ctx.deps.persistCandidateReview = async (params) => {
+    await persistGate;
+    return originalPersist(params);
+  };
+
+  const first = await handleSlackBlockAction(
+    blockActionPayload({
+      actionId: SLACK_ACTION_IDS.approve,
+      value: "cand-1",
+      triggerId: "trig-race-a",
+    }),
+    ctx.deps,
+  );
+  assert.match(first.httpBody.text ?? "", /Approved/);
+  assert.doesNotMatch(JSON.stringify(first.httpBody.blocks), /"text":"Reject"/);
+
+  const second = await handleSlackBlockAction(
+    blockActionPayload({
+      actionId: SLACK_ACTION_IDS.reject,
+      value: "cand-1",
+      triggerId: "trig-race-b",
+    }),
+    ctx.deps,
+  );
+  assert.equal(second.httpBody.response_type, "ephemeral");
+  assert.equal(second.httpBody.text, SLACK_INTERACTION_MESSAGES.reviewInProgress);
+
+  releasePersist();
+  await first.background!();
+  assert.equal(ctx.candidateRef().reviewDecision, "approved");
 });
 
 test("conflicting decisions are rejected without changing the stored decision", async () => {
