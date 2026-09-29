@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { ProductCard, ProductCardGrid } from "@/components/product-card";
 import {
   DEMO_CATALOG_PRODUCTS,
   PUBLIC_ARCHITECTURE_URL,
@@ -98,28 +99,19 @@ export default async function HomePage() {
               and screenshots.
             </p>
           </div>
-          <ul className={styles.demoGrid}>
+          <ProductCardGrid>
             {DEMO_CATALOG_PRODUCTS.map((product) => (
               <li key={product.sku}>
-                <Link
+                <ProductCard
                   href={`/products/${product.sku}`}
-                  className={styles.demoCard}
-                >
-                  <div className={styles.demoMedia}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={product.photoUrl} alt="" />
-                  </div>
-                  <div className={styles.demoCopy}>
-                    <p className={styles.demoSku}>{product.sku}</p>
-                    <h3>{product.productName}</h3>
-                    <p className={styles.demoMeta}>
-                      Priority {product.priority}
-                    </p>
-                  </div>
-                </Link>
+                  sku={product.sku}
+                  productName={product.productName}
+                  photoUrl={product.photoUrl}
+                  meta={<p>Priority {product.priority}</p>}
+                />
               </li>
             ))}
-          </ul>
+          </ProductCardGrid>
         </section>
       </div>
     </main>

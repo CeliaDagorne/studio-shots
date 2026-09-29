@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { ProductCard, ProductCardGrid } from "@/components/product-card";
 import { getCampaignPageData } from "@/lib/campaigns";
 import { CAMPAIGN_METRICS_INTRO, CAMPAIGN_PAGE_LEDE_SUFFIX } from "@/lib/website-copy";
 
@@ -112,31 +113,27 @@ export default async function CampaignPage(props: PageProps) {
               values to populate the grid.
             </p>
           ) : (
-            <ul className={styles.grid}>
+            <ProductCardGrid>
               {data.products.map((product) => (
-                <li key={product.sku} className={styles.card}>
-                  <div className={styles.cardMedia}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={product.photoUrl} alt={product.productName} />
-                  </div>
-                  <div className={styles.cardBody}>
-                    <p className={styles.sku}>{product.sku}</p>
-                    <h3>{product.productName}</h3>
-                    <p className={styles.priority}>
-                      Priority: {product.priority ?? "unspecified"}
-                    </p>
-                    <p className={styles.shotIdea}>{product.shotIdea}</p>
-                    <p className={styles.status}>
-                      Status: {product.workflowStatusLabel}
-                    </p>
-                    <p className={styles.approved}>
-                      Approved images: {product.approvedImageCount}
-                    </p>
-                    <Link href={product.productPagePath}>Open product page</Link>
-                  </div>
+                <li key={product.sku}>
+                  <ProductCard
+                    href={product.productPagePath}
+                    sku={product.sku}
+                    productName={product.productName}
+                    photoUrl={product.photoUrl}
+                    photoAlt={product.productName}
+                    meta={
+                      <>
+                        <p>Priority {product.priority ?? "unspecified"}</p>
+                        <p>{product.shotIdea}</p>
+                        <p>Status: {product.workflowStatusLabel}</p>
+                        <p>Approved images: {product.approvedImageCount}</p>
+                      </>
+                    }
+                  />
                 </li>
               ))}
-            </ul>
+            </ProductCardGrid>
           )}
         </section>
       </div>
