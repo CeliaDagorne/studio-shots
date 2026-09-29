@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { getCampaignPageData } from "@/lib/campaigns";
+import { CAMPAIGN_METRICS_INTRO, CAMPAIGN_PAGE_LEDE_SUFFIX } from "@/lib/website-copy";
 
 import styles from "./campaign.module.css";
 
@@ -46,15 +47,14 @@ export default async function CampaignPage(props: PageProps) {
           <h1>Import overview</h1>
           <p className={styles.lede}>
             Imported {data.importedAtLabel}
-            {data.filename ? ` from ${data.filename}` : ""}. This page is read-only—generate and
-            review products in Telegram.
+            {data.filename ? ` from ${data.filename}` : ""}. {CAMPAIGN_PAGE_LEDE_SUFFIX}
           </p>
         </header>
 
         <section className={styles.section} aria-labelledby="metrics-heading">
           <div className={styles.sectionHead}>
             <h2 id="metrics-heading">Campaign totals</h2>
-            <p>Live rollup from the same status rules used in Telegram /status.</p>
+            <p>{CAMPAIGN_METRICS_INTRO}</p>
           </div>
           <dl className={styles.metrics}>
             <div>

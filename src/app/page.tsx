@@ -7,6 +7,13 @@ import {
   PUBLIC_README_URL,
   tryGetLatestCampaignSummary,
 } from "@/lib/campaigns";
+import {
+  HOME_HERO_TITLE,
+  HOME_LATEST_CAMPAIGN_SUFFIX,
+  HOME_STEPS,
+  HOME_STEPS_INTRO,
+  SITE_DESCRIPTION,
+} from "@/lib/website-copy";
 
 import styles from "./home.module.css";
 
@@ -20,12 +27,8 @@ export default async function HomePage() {
       <div className={styles.shell}>
         <header className={styles.hero}>
           <p className={styles.eyebrow}>Studio Shots</p>
-          <h1>Telegram-first AI product photography</h1>
-          <p className={styles.lede}>
-            Import a catalog in chat, preview spend, generate lifestyle
-            candidates with Luma, and approve shots where your team already
-            works—then download approved assets for product pages.
-          </p>
+          <h1>{HOME_HERO_TITLE}</h1>
+          <p className={styles.lede}>{SITE_DESCRIPTION}</p>
           <div className={styles.ctaRow}>
             <a className={styles.primaryLink} href={PUBLIC_GITHUB_REPO_URL}>
               View on GitHub
@@ -47,14 +50,14 @@ export default async function HomePage() {
           </div>
           {!latestCampaign ? (
             <p className={styles.hint}>
-              No campaign imported yet. Upload a catalog CSV in Telegram with
-              caption <code>/import</code> to create one.
+              No campaign imported yet. Upload a catalog CSV in Slack and mention @Studio
+              Shots with <code>import</code> to create one.
             </p>
           ) : (
             <p className={styles.hint}>
               Latest import {latestCampaign.importedAtLabel}
-              {latestCampaign.filename ? ` · ${latestCampaign.filename}` : ""}.
-              Generation and review stay in Telegram—this site is read-only.
+              {latestCampaign.filename ? ` · ${latestCampaign.filename}` : ""}.{" "}
+              {HOME_LATEST_CAMPAIGN_SUFFIX}
             </p>
           )}
         </header>
@@ -62,35 +65,27 @@ export default async function HomePage() {
         <section className={styles.section} aria-labelledby="steps-heading">
           <div className={styles.sectionHead}>
             <h2 id="steps-heading">How it works</h2>
-            <p>Four steps from catalog CSV to downloadable approved assets.</p>
+            <p>{HOME_STEPS_INTRO}</p>
           </div>
           <ol className={styles.steps}>
             <li>
-              <strong>Import catalog</strong>
+              <strong>{HOME_STEPS[0].title}</strong>
               <span>
-                Send your product CSV in Telegram with caption /import.
+                Attach your product CSV in Slack and mention @Studio Shots with{" "}
+                <code>import</code>.
               </span>
             </li>
             <li>
-              <strong>Preview scope and cost</strong>
-              <span>
-                Confirm actionable SKUs and estimated generation spend before
-                any paid run.
-              </span>
+              <strong>{HOME_STEPS[1].title}</strong>
+              <span>{HOME_STEPS[1].body}</span>
             </li>
             <li>
-              <strong>Generate and review in Telegram</strong>
-              <span>
-                Generate one product at a time, then approve or reject each
-                candidate in chat.
-              </span>
+              <strong>{HOME_STEPS[2].title}</strong>
+              <span>{HOME_STEPS[2].body}</span>
             </li>
             <li>
-              <strong>Download approved assets</strong>
-              <span>
-                Approved Blob-backed images appear on public product pages for
-                e-commerce.
-              </span>
+              <strong>{HOME_STEPS[3].title}</strong>
+              <span>{HOME_STEPS[3].body}</span>
             </li>
           </ol>
         </section>

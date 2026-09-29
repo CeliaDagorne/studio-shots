@@ -3,6 +3,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { formatPriceCents, getProductPageData } from "@/lib/products";
+import {
+  PRODUCT_EMPTY_APPROVED_PREFIX,
+  PRODUCT_EMPTY_APPROVED_SUFFIX,
+} from "@/lib/website-copy";
 
 import styles from "./product.module.css";
 
@@ -105,8 +109,7 @@ export default async function ProductPage(props: PageProps) {
             </div>
           ) : (
             <p className={styles.empty}>
-              No approved styled shots yet for {data.sku}. Once a reviewer approves candidates in
-              Telegram, they will appear here automatically.
+              {PRODUCT_EMPTY_APPROVED_PREFIX} {data.sku}. {PRODUCT_EMPTY_APPROVED_SUFFIX}
             </p>
           )}
         </section>
