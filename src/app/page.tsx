@@ -104,7 +104,7 @@ export default async function HomePage() {
                   sku={product.sku}
                   productName={product.productName}
                   photoUrl={product.photoUrl}
-                  meta={<p>Priority {product.priority}</p>}
+                  meta={<p>Priority: {product.priority}</p>}
                 />
               </li>
             ))}
