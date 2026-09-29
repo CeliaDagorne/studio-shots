@@ -84,7 +84,7 @@ export const formatUsdMicros = (micros: number): string => {
 };
 
 export const IMPORT_UP_TO_DATE_MESSAGE =
-  "Everything is up to date — no pending shot requests to generate.";
+  "Everything is up to date. No pending shot requests to generate.";
 
 export const hasActionableGenerations = (summary: RequestPlanSummary): boolean =>
   summary.requestsReadyToGenerate > 0;
@@ -119,7 +119,8 @@ export const buildImportPreviewText = (
     `- Existing pending requests: ${summary.existingPendingRequests}`,
     `- Requests ready to generate: ${summary.requestsReadyToGenerate}`,
     `- Planned generations: ${summary.plannedGenerations}`,
-    `- Additional estimated cost: ${formatUsdMicros(summary.additionalEstimatedCostMicrosUsd)}`,
+    `- Additional estimated cost (all ready products): ${formatUsdMicros(summary.additionalEstimatedCostMicrosUsd)}`,
+    `- Estimated cost per product: ${formatUsdMicros(estimatedCostMicrosForOneProduct())} (3 candidates)`,
     `- Aspect ratio: ${MVP_ASPECT_RATIO}`,
     formatPriorityRequestPreviewLine(summary),
     "",
@@ -137,11 +138,27 @@ export const buildImportPreviewText = (
 
   return lines.join("\n");
 };
+
 export const estimatedCostMicrosForOneProduct = (): number =>
   CANDIDATES_PER_REQUEST * IMAGE_REF_COST_USD_MICROS;
 
+export const formatOneProductCostLabel = (): string =>
+  `~${formatUsdMicros(estimatedCostMicrosForOneProduct())}`;
+
+/** Button / action label for generating the priority SKU (includes per-product cost). */
+export const formatPriorityGenerateButtonText = (
+  sku: string | null | undefined,
+): string => {
+  const cost = formatOneProductCostLabel();
+  return sku ? `Generate priority: ${sku} · ${cost}` : `Generate priority · ${cost}`;
+};
+
 export const formatProductPickerButtonText = (option: ActionableProductOption): string =>
-  `${option.sku} · ${option.priority} · ~${formatUsdMicros(estimatedCostMicrosForOneProduct())}`;
+  `${option.sku} · ${option.priority} · ${formatOneProductCostLabel()}`;
+
+/** Confirmation line after the operator starts a single-product generation. */
+export const formatGenerationStartedLine = (label: string): string =>
+  `Confirmed: generating ${label} in the background (${formatOneProductCostLabel()} for 3 candidates).`;
 
 export const requestPlanFromCounts = (params: {
   totalCatalogRows: number;

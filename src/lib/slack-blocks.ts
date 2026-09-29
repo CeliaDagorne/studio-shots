@@ -1,6 +1,8 @@
 import {
   buildImportPreviewText,
   estimatedCostMicrosForOneProduct,
+  formatGenerationStartedLine,
+  formatPriorityGenerateButtonText,
   formatPriorityRequestPreviewLine,
   formatProductPickerButtonText,
   formatUsdMicros,
@@ -80,9 +82,7 @@ export const buildSlackImportActionElements = (
     return [];
   }
 
-  const priorityLabel = summary.priorityRequestSku
-    ? `Generate priority: ${summary.priorityRequestSku}`
-    : "Generate priority";
+  const priorityLabel = formatPriorityGenerateButtonText(summary.priorityRequestSku);
 
   return [
     {
@@ -171,7 +171,7 @@ export const buildSlackImportPreviewBlocks = (
       fields: [
         {
           type: "mrkdwn",
-          text: `*Estimated generation cost*\n${formatUsdMicros(summary.additionalEstimatedCostMicrosUsd)}`,
+          text: `*Estimated generation cost*\n${formatUsdMicros(summary.additionalEstimatedCostMicrosUsd)} (all ready)\n${formatUsdMicros(estimatedCostMicrosForOneProduct())} per product`,
         },
         { type: "mrkdwn", text: `*Aspect ratio*\n${MVP_ASPECT_RATIO}` },
         {
@@ -368,7 +368,7 @@ export const buildSlackGenerationStartedBlocks = (
     elements: [
       {
         type: "mrkdwn",
-        text: `*Confirmed:* generating ${label} in the background.`,
+        text: `*${formatGenerationStartedLine(label)}*`,
       },
     ],
   },

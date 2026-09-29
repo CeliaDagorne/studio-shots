@@ -23,6 +23,7 @@ import {
   evaluateProductSelection,
   selectionErrorMessage,
 } from "@/lib/product-selection";
+import { formatGenerationStartedLine } from "@/lib/request-planning";
 import { CANDIDATE_STATUS, PRIORITY_CANDIDATE_COUNT, REVIEW_DECISION, WORKFLOW } from "@/lib/review";
 import type { GenerationCandidateRow, ImportRow, ShotRequestRow } from "@/lib/schema";
 import { isAllowedSlackChannel, isAllowedSlackTeam } from "@/lib/slack";
@@ -294,7 +295,7 @@ export const handleSlackBlockAction = async (
     return {
       httpBody: {
         replace_original: true,
-        text: `${buildSlackImportPreviewFallbackText(summary, { campaignPageUrl })}\n\nConfirmed: generating ${label} in the background.`,
+        text: `${buildSlackImportPreviewFallbackText(summary, { campaignPageUrl })}\n\n${formatGenerationStartedLine(label)}`,
         blocks: buildSlackGenerationStartedBlocks(summary, label, { campaignPageUrl }),
       },
       background: async () => {
@@ -346,7 +347,7 @@ export const handleSlackBlockAction = async (
     return {
       httpBody: {
         replace_original: true,
-        text: `${buildSlackImportPreviewFallbackText(summary, { campaignPageUrl })}\n\nConfirmed: generating ${label} in the background.`,
+        text: `${buildSlackImportPreviewFallbackText(summary, { campaignPageUrl })}\n\n${formatGenerationStartedLine(label)}`,
         blocks: buildSlackGenerationStartedBlocks(summary, label, { campaignPageUrl }),
       },
       background: async () => {

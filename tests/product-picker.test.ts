@@ -58,7 +58,7 @@ test("import preview offers priority, choose, and cancel — never Generate all"
   const labels = keyboard.inline_keyboard.flat().map((button) => button.text);
   const callbacks = keyboard.inline_keyboard.flat().map((button) => button.callback_data);
 
-  assert.equal(labels[0], "Generate priority: SS-001");
+  assert.equal(labels[0], "Generate priority: SS-001 · ~$0.13");
   assert.equal(labels[1], "Choose a product");
   assert.equal(labels[2], "Cancel");
   assert.equal(callbacks[0], "imp:priority:import-1");
@@ -122,7 +122,7 @@ test("priority shortcut selects the highest-priority actionable request", () => 
 
   const summary = summaryWithActionable(actionable, selected?.sku ?? null);
   const keyboard = importPreviewKeyboard(summary.importId, summary);
-  assert.equal(keyboard?.inline_keyboard[0]?.[0]?.text, "Generate priority: SS-001");
+  assert.equal(keyboard?.inline_keyboard[0]?.[0]?.text, "Generate priority: SS-001 · ~$0.13");
   assert.equal(
     actionable.find((entry) => entry.sku === summary.priorityRequestSku)?.requestId,
     "req-high",

@@ -28,7 +28,7 @@ import {
   evaluateProductSelection,
   selectionErrorMessage,
 } from "@/lib/product-selection";
-import { buildImportPreviewText } from "@/lib/request-planning";
+import { buildImportPreviewText, formatGenerationStartedLine } from "@/lib/request-planning";
 import { formatStudioStatusMessage, getStudioStatusSummary } from "@/lib/status";
 import {
   answerCallbackQuery,
@@ -267,7 +267,7 @@ const handleImportCallback = async (
     await editMessageText(
       chatId,
       messageId,
-      `${previewText}\n\nConfirmed: generating priority product ${prioritySku} in the background.`,
+      `${previewText}\n\n${formatGenerationStartedLine(`priority product ${prioritySku}`)}`,
       removeInlineKeyboard(),
     );
     await answerCallbackQuery(callbackId, "Priority generation started.");
@@ -309,7 +309,7 @@ const handleImportCallback = async (
     await editMessageText(
       chatId,
       messageId,
-      `${previewText}\n\nConfirmed: generating ${option.sku} (${option.priority}) in the background.`,
+      `${previewText}\n\n${formatGenerationStartedLine(`${option.sku} (${option.priority})`)}`,
       removeInlineKeyboard(),
     );
     await answerCallbackQuery(callbackId, `Generating ${option.sku}.`);

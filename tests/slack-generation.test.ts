@@ -142,9 +142,10 @@ test("import preview Block Kit includes Generate priority, Choose a product, and
     campaignPageUrl: "https://studio-shots.example/campaigns/import-aaa",
   });
   const serialized = JSON.stringify(blocks);
-  assert.match(serialized, /Generate priority: SS-001/);
+  assert.match(serialized, /Generate priority: SS-001 · ~\$0\.13/);
   assert.match(serialized, /Choose a product/);
   assert.match(serialized, /Cancel/);
+  assert.match(serialized, /per product/);
   assert.match(serialized, new RegExp(SLACK_ACTION_IDS.priority));
 });
 
@@ -202,7 +203,7 @@ test("priority generation action starts the shared generation path", async () =>
     },
   );
 
-  assert.match(result.httpBody.text, /Confirmed: generating priority product SS-001/);
+  assert.match(result.httpBody.text, /Confirmed: generating priority product SS-001 in the background \(~\$0\.13 for 3 candidates\)/);
   assert.equal(result.httpBody.replace_original, true);
   await result.background!();
   assert.equal(priorityCalls, 1);
@@ -228,7 +229,7 @@ test("manual SKU selection validates request id and sku server-side", async () =
       },
     },
   );
-  assert.match(ok.httpBody.text, /Confirmed: generating SS-002/);
+  assert.match(ok.httpBody.text, /Confirmed: generating SS-002 \(normal\) in the background \(~\$0\.13 for 3 candidates\)/);
   await ok.background!();
   assert.equal(selectedCalls, 1);
 

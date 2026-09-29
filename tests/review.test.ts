@@ -62,7 +62,7 @@ test("importPreviewKeyboard shows priority, choose, and cancel actions", () => {
   const keyboard = importPreviewKeyboard(summary.importId, summary);
   assert.ok(keyboard);
   assert.equal(keyboard.inline_keyboard.length, 3);
-  assert.equal(keyboard.inline_keyboard[0]?.[0]?.text, "Generate priority: SS-001");
+  assert.equal(keyboard.inline_keyboard[0]?.[0]?.text, "Generate priority: SS-001 · ~$0.13");
   assert.equal(keyboard.inline_keyboard[1]?.[0]?.text, "Choose a product");
   assert.equal(keyboard.inline_keyboard[2]?.[0]?.text, "Cancel");
 });

@@ -1,5 +1,6 @@
 import {
   estimatedCostMicrosForOneProduct,
+  formatPriorityGenerateButtonText,
   formatProductPickerButtonText,
   formatUsdMicros,
 } from "@/lib/request-planning";
@@ -132,9 +133,7 @@ export const importPreviewKeyboard = (
     return undefined;
   }
 
-  const priorityLabel = summary.priorityRequestSku
-    ? `Generate priority: ${summary.priorityRequestSku}`
-    : "Generate priority";
+  const priorityLabel = formatPriorityGenerateButtonText(summary.priorityRequestSku);
 
   return {
     inline_keyboard: [
@@ -268,7 +267,7 @@ export const parseImportCallbackData = (data: string): ImportCallbackAction | nu
 export const helpMessage = (appUrl?: string) => {
   const base = (appUrl ?? "").replace(/\/+$/, "");
   const lines = [
-    "Studio Shots — styled product photography, reviewed in Telegram.",
+    "Studio Shots: styled product photography, reviewed in Telegram.",
     "",
     "Import:",
     "- Upload a catalog CSV with caption /import",
@@ -280,8 +279,8 @@ export const helpMessage = (appUrl?: string) => {
     "- Approved images appear on the public product page for the e-commerce team",
     "",
     "Team visibility:",
-    "- /status — campaign progress and estimated generation spend",
-    "- /help — this message",
+    "- /status: campaign progress and estimated generation spend",
+    "- /help: this message",
   ];
 
   if (base) {

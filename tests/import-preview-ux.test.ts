@@ -45,7 +45,7 @@ test("importPreviewKeyboard includes generate actions for pending unchanged requ
   assert.ok(keyboard);
   assert.equal(keyboard.inline_keyboard.length, 3);
   assert.match(keyboard.inline_keyboard[0]?.[0]?.callback_data ?? "", /imp:priority:test-import-id/);
-  assert.equal(keyboard.inline_keyboard[0]?.[0]?.text, "Generate priority: SS-001");
+  assert.equal(keyboard.inline_keyboard[0]?.[0]?.text, "Generate priority: SS-001 · ~$0.13");
   assert.equal(keyboard.inline_keyboard[1]?.[0]?.text, "Choose a product");
   assert.equal(keyboard.inline_keyboard[2]?.[0]?.text, "Cancel");
 });
@@ -68,7 +68,8 @@ test("buildImportPreviewText includes up-to-date message only when nothing is ac
   assert.match(pending, /Existing pending requests: 16/);
   assert.match(pending, /Requests ready to generate: 16/);
   assert.match(pending, /Planned generations: 48/);
-  assert.match(pending, /Additional estimated cost: \$2\.08/);
+  assert.match(pending, /Additional estimated cost \(all ready products\): \$2\.08/);
+  assert.match(pending, /Estimated cost per product: \$0\.13 \(3 candidates\)/);
   assert.match(pending, /Priority request: SS-001 \(high\)/);
 });
 
