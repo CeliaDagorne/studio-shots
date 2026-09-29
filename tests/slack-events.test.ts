@@ -190,15 +190,12 @@ test("unauthorized workspace is acknowledged without posting", async () => {
   resetSlackEventDedupeForTests();
 });
 
-test("unauthorized channel is acknowledged without posting", async () => {
-  const { resetSlackEventDedupeForTests } = await import("@/lib/slack-dedupe");
+test("unauthorized channel is acknowledged with a clear refusal message", async () => {
   const { processSlackEventCallback } = await import("@/lib/slack");
-  const { POST } = await import("@/app/api/slack/events/route");
-
-  resetSlackEventDedupeForTests();
+  const { SLACK_IMPORT_MESSAGES } = await import("@/lib/slack-import");
 
   await withMockedSlackPost(async (posts) => {
-    const payload = {
+    const result = await processSlackEventCallback({
       type: "event_callback",
       team_id: "T_ALLOWED",
       event_id: "Ev_CHANNEL_1",
@@ -207,19 +204,12 @@ test("unauthorized channel is acknowledged without posting", async () => {
         channel: "C_OTHER",
         text: "<@U_BOT> help",
       },
-    };
-    const rawBody = JSON.stringify(payload);
-    const timestamp = String(Math.floor(Date.now() / 1000));
-    const response = await POST(signedRequest(rawBody, timestamp));
-    assert.equal(response.status, 200);
-
-    const result = await processSlackEventCallback(payload as never);
+    });
     assert.equal(result.handled, false);
     assert.equal(result.reason, "unauthorized_channel");
-    assert.equal(posts.length, 0);
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0]?.text, SLACK_IMPORT_MESSAGES.unauthorizedChannel);
   });
-
-  resetSlackEventDedupeForTests();
 });
 
 test("app_mention in the allowlisted channel posts the Studio Shots help message", async () => {

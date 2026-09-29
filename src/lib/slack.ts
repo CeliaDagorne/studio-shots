@@ -1,4 +1,11 @@
 import { env } from "@/lib/env";
+import type { SlackBlock } from "@/lib/slack-blocks";
+import {
+  isSlackImportIntent,
+  runSlackCatalogImport,
+  SLACK_IMPORT_MESSAGES,
+  type SlackFileAttachment,
+} from "@/lib/slack-import";
 
 export type SlackUrlVerification = {
   type: "url_verification";
@@ -13,6 +20,7 @@ export type SlackAppMentionEvent = {
   channel: string;
   ts?: string;
   event_ts?: string;
+  files?: SlackFileAttachment[];
 };
 
 export type SlackEventCallback = {
@@ -52,8 +60,11 @@ export const slackHelpMessage = (appUrl?: string): string => {
   const lines = [
     "Studio Shots — styled product photography for catalog teams.",
     "",
-    "Mention @Studio Shots in this channel for help.",
-    "Catalog import, generation, and review currently run in Telegram; Slack workflows are being added.",
+    "Import a catalog in this channel:",
+    "- Attach one CSV and mention @Studio Shots with `import`",
+    "- I'll reply with a cost and scope preview",
+    "",
+    "Product selection and generation still run in Telegram for now.",
     "",
     "Team visibility:",
     "- Public product pages for approved shots",
@@ -69,12 +80,14 @@ export const slackHelpMessage = (appUrl?: string): string => {
 type SlackApiResult = {
   ok: boolean;
   error?: string;
+  ts?: string;
 };
 
 export const postSlackMessage = async (params: {
   channel: string;
   text: string;
-}): Promise<void> => {
+  blocks?: SlackBlock[];
+}): Promise<{ ts?: string }> => {
   const response = await fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
     headers: {
@@ -84,6 +97,7 @@ export const postSlackMessage = async (params: {
     body: JSON.stringify({
       channel: params.channel,
       text: params.text,
+      ...(params.blocks ? { blocks: params.blocks } : {}),
     }),
     cache: "no-store",
   });
@@ -96,11 +110,13 @@ export const postSlackMessage = async (params: {
   if (!json.ok) {
     throw new Error(`Slack chat.postMessage failed: ${json.error ?? "unknown_error"}`);
   }
+
+  return { ts: json.ts };
 };
 
 /**
  * Handle a verified Slack event_callback after the HTTP ack has been (or will be) returned.
- * Unauthorized team/channel and unknown event types are no-ops.
+ * Unauthorized teams are ignored. Unauthorized channels get a clear refusal message.
  */
 export const processSlackEventCallback = async (
   payload: SlackEventCallback,
@@ -114,9 +130,33 @@ export const processSlackEventCallback = async (
     return { handled: false, reason: "ignored_event_type" };
   }
 
-  const channel = event.channel;
-  if (!channel || !isAllowedSlackChannel(channel)) {
+  const mention = event as SlackAppMentionEvent;
+  const channel = mention.channel;
+  if (!channel) {
+    return { handled: false, reason: "missing_channel" };
+  }
+
+  if (!isAllowedSlackChannel(channel)) {
+    await postSlackMessage({
+      channel,
+      text: SLACK_IMPORT_MESSAGES.unauthorizedChannel,
+    });
     return { handled: false, reason: "unauthorized_channel" };
+  }
+
+  if (isSlackImportIntent(mention.text)) {
+    const result = await runSlackCatalogImport({
+      channel,
+      externalEventId: payload.event_id,
+      files: mention.files,
+      deps: {
+        postMessage: postSlackMessage,
+      },
+    });
+    return {
+      handled: result.ok,
+      reason: result.reason ?? "import",
+    };
   }
 
   await postSlackMessage({
@@ -124,5 +164,5 @@ export const processSlackEventCallback = async (
     text: slackHelpMessage(env.appUrl),
   });
 
-  return { handled: true };
+  return { handled: true, reason: "help" };
 };

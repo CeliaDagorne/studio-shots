@@ -6,6 +6,7 @@ import {
   parseTelegramChatId,
   parseTelegramMessageId,
   requireTelegramConversation,
+  slackConversation,
   telegramConversation,
   toExternalEventId,
   toExternalMessageId,
@@ -28,6 +29,12 @@ test("stableImportId is scoped by platform and external event id", () => {
   const slackId = stableImportId(CHAT_PLATFORM.slack, "100");
   assert.notEqual(telegramId, slackId);
   assert.equal(stableImportId(CHAT_PLATFORM.telegram, "100"), telegramId);
+});
+
+test("slack conversation identity uses channel ids", () => {
+  const conversation = slackConversation("C012345");
+  assert.equal(conversation.platform, CHAT_PLATFORM.slack);
+  assert.equal(conversation.conversationId, "C012345");
 });
 
 test("requireTelegramConversation rejects unimplemented platforms", () => {

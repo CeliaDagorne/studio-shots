@@ -16,6 +16,11 @@ export const telegramConversation = (chatId: number | string): ChatConversation 
   conversationId: String(chatId),
 });
 
+export const slackConversation = (channelId: string): ChatConversation => ({
+  platform: CHAT_PLATFORM.slack,
+  conversationId: channelId,
+});
+
 export const toExternalEventId = (value: number | string): string => String(value);
 
 export const toExternalMessageId = (value: number | string): string => String(value);
