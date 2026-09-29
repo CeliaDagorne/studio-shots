@@ -31,6 +31,11 @@ export const claimSlackEventId = (
   return true;
 };
 
+/** Release a previously claimed id so a later interaction can claim it again. */
+export const releaseSlackEventId = (eventId: string) => {
+  seen.delete(eventId);
+};
+
 /** Test helper: clear the in-memory dedupe set. */
 export const resetSlackEventDedupeForTests = () => {
   seen.clear();

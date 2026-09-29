@@ -34,13 +34,56 @@ import {
   buildSlackImportPreviewBlocks,
   buildSlackImportPreviewFallbackText,
   buildSlackProductPickerBlocks,
+  finalizeSlackCandidateMessageBlocks,
   parseSlackGenValue,
   parseSlackPageValue,
   SLACK_ACTION_IDS,
   type SlackBlock,
 } from "@/lib/slack-blocks";
-import { claimSlackEventId } from "@/lib/slack-dedupe";
+import { claimSlackEventId, releaseSlackEventId } from "@/lib/slack-dedupe";
 import type { ActionableProductOption } from "@/types";
+
+const postSlackResponseUrl = async (
+  responseUrl: string,
+  body: SlackInteractionResponse,
+): Promise<void> => {
+  const response = await fetch(responseUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json; charset=utf-8" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(`Slack response_url HTTP ${response.status}`);
+  }
+};
+
+const reviewedMessageResponse = (
+  decision: "approved" | "rejected",
+  sourceBlocks: SlackBlock[] | undefined,
+): SlackInteractionResponse => {
+  const text = decision === "approved" ? "Status: Approved" : "Status: Rejected";
+  if (sourceBlocks && sourceBlocks.length > 0) {
+    return {
+      replace_original: true,
+      text,
+      blocks: finalizeSlackCandidateMessageBlocks(sourceBlocks, decision),
+    };
+  }
+  return {
+    replace_original: true,
+    text,
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: decision === "approved" ? "*Status: Approved*" : "*Status: Rejected*",
+        },
+      },
+    ],
+  };
+};
 
 export type SlackBlockAction = {
   action_id: string;
@@ -55,7 +98,11 @@ export type SlackInteractionPayload = {
   team?: { id?: string };
   channel?: { id?: string };
   user?: { id?: string };
-  message?: { ts?: string; text?: string };
+  message?: {
+    ts?: string;
+    text?: string;
+    blocks?: SlackBlock[];
+  };
   response_url?: string;
   actions?: SlackBlockAction[];
 };
@@ -88,6 +135,8 @@ export type SlackActionDeps = {
   runSelectedRequestGeneration?: typeof runSelectedRequestGeneration;
   notifyConversation?: typeof notifyConversation;
   claimAction?: typeof claimSlackEventId;
+  releaseAction?: typeof releaseSlackEventId;
+  postResponseUrl?: typeof postSlackResponseUrl;
   appUrl?: string;
   isAllowedTeam?: (teamId: string) => boolean;
   isAllowedChannel?: (channelId: string) => boolean;
@@ -149,6 +198,8 @@ export const handleSlackBlockAction = async (
   const runSelected = deps.runSelectedRequestGeneration ?? runSelectedRequestGeneration;
   const notify = deps.notifyConversation ?? notifyConversation;
   const claimAction = deps.claimAction ?? claimSlackEventId;
+  const releaseAction = deps.releaseAction ?? releaseSlackEventId;
+  const postResponseUrl = deps.postResponseUrl ?? postSlackResponseUrl;
   const appUrl = deps.appUrl ?? env.appUrl;
   const allowTeam = deps.isAllowedTeam ?? isAllowedSlackTeam;
   const allowChannel = deps.isAllowedChannel ?? isAllowedSlackChannel;
@@ -367,131 +418,161 @@ export const handleSlackBlockAction = async (
     const decision =
       action.action_id === SLACK_ACTION_IDS.approve ? "approved" : "rejected";
     const candidateId = action.value;
-    const candidate = await getCandidate(candidateId);
-
-    if (!candidate) {
-      return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.missingCandidate) };
-    }
-    if (candidate.platform !== CHAT_PLATFORM.slack) {
-      return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.staleCandidate) };
-    }
-    if (candidate.conversationId !== channelId) {
-      return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.wrongCandidateConversation) };
-    }
-    if (candidate.status !== CANDIDATE_STATUS.ready || !candidate.blobUrl) {
-      return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.staleCandidate) };
-    }
-
-    const messageTs = payload.message?.ts;
-    if (
-      candidate.externalMessageId &&
-      messageTs &&
-      candidate.externalMessageId !== messageTs
-    ) {
-      return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.staleCandidate) };
-    }
-
-    if (candidate.reviewDecision) {
-      if (candidate.reviewDecision === decision) {
-        const built = buildSlackCandidateBlocks({
-          caption: "",
-          blobUrl: candidate.blobUrl,
-          candidateId: candidate.id,
-          sku: candidate.productSku,
-          candidateIndex: candidate.candidateIndex,
-          total: PRIORITY_CANDIDATE_COUNT,
-          reviewDecision: candidate.reviewDecision,
-        });
-        return {
-          httpBody: {
-            replace_original: true,
-            text: built.text,
-            blocks: built.blocks,
-          },
-        };
-      }
-      return {
-        httpBody: ephemeral(
-          candidate.reviewDecision === REVIEW_DECISION.approved
-            ? SLACK_INTERACTION_MESSAGES.alreadyApproved
-            : candidate.reviewDecision === REVIEW_DECISION.rejected
-              ? SLACK_INTERACTION_MESSAGES.alreadyRejected
-              : SLACK_INTERACTION_MESSAGES.conflictingDecision,
-        ),
-      };
-    }
+    const reviewClaimKey = `slack-review:${candidateId}`;
 
     // Claim before responding so a second Approve/Reject cannot stay clickable while
     // the first click's spinner is still showing.
-    if (!claimAction(`slack-review:${candidate.id}`)) {
+    if (!claimAction(reviewClaimKey)) {
       return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.reviewInProgress) };
     }
 
-    const built = buildSlackCandidateBlocks({
-      caption: "",
-      blobUrl: candidate.blobUrl,
-      candidateId: candidate.id,
-      sku: candidate.productSku,
-      candidateIndex: candidate.candidateIndex,
-      total: PRIORITY_CANDIDATE_COUNT,
-      reviewDecision: decision,
-    });
+    const sourceBlocks = Array.isArray(payload.message?.blocks)
+      ? payload.message.blocks
+      : undefined;
+    const httpBody = reviewedMessageResponse(decision, sourceBlocks);
+    const responseUrl = payload.response_url;
 
     return {
-      httpBody: {
-        replace_original: true,
-        text: built.text,
-        blocks: built.blocks,
-      },
+      httpBody,
       background: async () => {
-        const persisted = await persistReview({
-          candidateId: candidate.id,
-          decision,
-        });
+        try {
+          const candidate = await getCandidate(candidateId);
 
-        if (
-          persisted.alreadyReviewed &&
-          persisted.existingDecision &&
-          persisted.existingDecision !== decision
-        ) {
-          console.error(
-            "[slack/review]",
-            `candidate ${candidate.id} already ${persisted.existingDecision}; ignored ${decision}`,
-          );
-          return;
-        }
+          const postEphemeral = async (text: string) => {
+            if (!responseUrl) return;
+            await postResponseUrl(responseUrl, ephemeral(text));
+          };
 
-        if (!persisted.newlyResolved || !persisted.requestStatus) {
-          return;
-        }
+          const postCandidateMessage = async (
+            row: GenerationCandidateRow,
+            reviewDecision: string,
+          ) => {
+            if (!responseUrl || !row.blobUrl) return;
+            const built = buildSlackCandidateBlocks({
+              caption: "",
+              blobUrl: row.blobUrl,
+              candidateId: row.id,
+              sku: row.productSku,
+              candidateIndex: row.candidateIndex,
+              total: PRIORITY_CANDIDATE_COUNT,
+              reviewDecision,
+            });
+            await postResponseUrl(responseUrl, {
+              replace_original: true,
+              text: built.text,
+              blocks: built.blocks,
+            });
+          };
 
-        if (
-          persisted.requestStatus === WORKFLOW.approved &&
-          persisted.approvedCount !== null &&
-          persisted.candidate
-        ) {
-          await notify(
-            conversation,
-            formatApprovalCompletionMessage({
-              sku: persisted.candidate.productSku,
-              approvedCount: persisted.approvedCount,
-              productPageUrl: buildProductPageUrl(
-                appUrl,
-                persisted.candidate.productSku,
-              ),
-              campaignPageUrl: persisted.importId
-                ? buildCampaignPageUrl(appUrl, persisted.importId)
-                : null,
-            }),
+          if (!candidate) {
+            await postEphemeral(SLACK_INTERACTION_MESSAGES.missingCandidate);
+            return;
+          }
+          if (candidate.platform !== CHAT_PLATFORM.slack) {
+            await postEphemeral(SLACK_INTERACTION_MESSAGES.staleCandidate);
+            return;
+          }
+          if (candidate.conversationId !== channelId) {
+            await postEphemeral(SLACK_INTERACTION_MESSAGES.wrongCandidateConversation);
+            return;
+          }
+          if (candidate.status !== CANDIDATE_STATUS.ready || !candidate.blobUrl) {
+            await postEphemeral(SLACK_INTERACTION_MESSAGES.staleCandidate);
+            return;
+          }
+
+          const messageTs = payload.message?.ts;
+          if (
+            candidate.externalMessageId &&
+            messageTs &&
+            candidate.externalMessageId !== messageTs
+          ) {
+            await postEphemeral(SLACK_INTERACTION_MESSAGES.staleCandidate);
+            return;
+          }
+
+          if (candidate.reviewDecision) {
+            await postCandidateMessage(candidate, candidate.reviewDecision);
+            if (candidate.reviewDecision !== decision) {
+              await postEphemeral(
+                candidate.reviewDecision === REVIEW_DECISION.approved
+                  ? SLACK_INTERACTION_MESSAGES.alreadyApproved
+                  : candidate.reviewDecision === REVIEW_DECISION.rejected
+                    ? SLACK_INTERACTION_MESSAGES.alreadyRejected
+                    : SLACK_INTERACTION_MESSAGES.conflictingDecision,
+              );
+            }
+            return;
+          }
+
+          const persisted = await persistReview({
+            candidateId: candidate.id,
+            decision,
+          });
+
+          if (
+            persisted.alreadyReviewed &&
+            persisted.existingDecision &&
+            persisted.existingDecision !== decision
+          ) {
+            console.error(
+              "[slack/review]",
+              `candidate ${candidate.id} already ${persisted.existingDecision}; ignored ${decision}`,
+            );
+            await postCandidateMessage(candidate, persisted.existingDecision);
+            await postEphemeral(
+              persisted.existingDecision === REVIEW_DECISION.approved
+                ? SLACK_INTERACTION_MESSAGES.alreadyApproved
+                : persisted.existingDecision === REVIEW_DECISION.rejected
+                  ? SLACK_INTERACTION_MESSAGES.alreadyRejected
+                  : SLACK_INTERACTION_MESSAGES.conflictingDecision,
+            );
+            return;
+          }
+
+          // Re-post via response_url so buttons stay gone even if Slack ignored
+          // the HTTP replace_original acknowledgement.
+          const finalDecision =
+            persisted.existingDecision ?? decision;
+          await postCandidateMessage(
+            persisted.candidate ?? candidate,
+            finalDecision,
           );
-        } else if (
-          persisted.requestStatus === WORKFLOW.needsRegeneration &&
-          persisted.candidate
-        ) {
-          await notify(
-            conversation,
-            `${persisted.candidate.productSku} needs regeneration (${persisted.approvedCount ?? 0} approvals; need at least 2).`,
-          );
+
+          if (!persisted.newlyResolved || !persisted.requestStatus) {
+            return;
+          }
+
+          if (
+            persisted.requestStatus === WORKFLOW.approved &&
+            persisted.approvedCount !== null &&
+            persisted.candidate
+          ) {
+            await notify(
+              conversation,
+              formatApprovalCompletionMessage({
+                sku: persisted.candidate.productSku,
+                approvedCount: persisted.approvedCount,
+                productPageUrl: buildProductPageUrl(
+                  appUrl,
+                  persisted.candidate.productSku,
+                ),
+                campaignPageUrl: persisted.importId
+                  ? buildCampaignPageUrl(appUrl, persisted.importId)
+                  : null,
+              }),
+            );
+          } else if (
+            persisted.requestStatus === WORKFLOW.needsRegeneration &&
+            persisted.candidate
+          ) {
+            await notify(
+              conversation,
+              `${persisted.candidate.productSku} needs regeneration (${persisted.approvedCount ?? 0} approvals; need at least 2).`,
+            );
+          }
+        } finally {
+          releaseAction(reviewClaimKey);
         }
       },
     };

@@ -440,3 +440,42 @@ export const buildSlackCandidateBlocks = (params: {
 
   return { text, blocks };
 };
+
+/**
+ * Drop action buttons and stamp Approved/Rejected on an existing candidate message.
+ * Used to ack Slack interactions before any DB work so buttons disappear immediately.
+ */
+export const finalizeSlackCandidateMessageBlocks = (
+  blocks: SlackBlock[],
+  decision: "approved" | "rejected",
+): SlackBlock[] => {
+  const statusLine =
+    decision === "approved" ? "*Status: Approved*" : "*Status: Rejected*";
+
+  return blocks
+    .filter((block) => block.type !== "actions")
+    .map((block) => {
+      if (block.type !== "section") {
+        return block;
+      }
+      const text = block.text;
+      if (!text || typeof text !== "object") {
+        return block;
+      }
+      const mrkdwn = text as { type?: string; text?: string };
+      if (typeof mrkdwn.text !== "string") {
+        return block;
+      }
+      if (!/candidate\s+\d+\s*\/\s*\d+/i.test(mrkdwn.text)) {
+        return block;
+      }
+      const firstLine = mrkdwn.text.split("\n")[0] ?? mrkdwn.text;
+      return {
+        ...block,
+        text: {
+          ...mrkdwn,
+          text: `${firstLine}\n${statusLine}`,
+        },
+      };
+    });
+};

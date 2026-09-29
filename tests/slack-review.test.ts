@@ -3,7 +3,8 @@ import test from "node:test";
 
 import type { PersistCandidateReviewResult } from "@/lib/generation";
 import type { GenerationCandidateRow } from "@/lib/schema";
-import type { SlackActionDeps } from "@/lib/slack-actions";
+import type { SlackActionDeps, SlackInteractionResponse } from "@/lib/slack-actions";
+import type { SlackBlock } from "@/lib/slack-blocks";
 
 process.env.APP_URL = process.env.APP_URL ?? "https://studio-shots.example";
 process.env.DATABASE_URL = process.env.DATABASE_URL ?? "postgres://example";
@@ -41,6 +42,29 @@ const sampleCandidate = (
     ...overrides,
   }) as GenerationCandidateRow;
 
+const sampleMessageBlocks = (): SlackBlock[] => [
+  {
+    type: "section",
+    text: {
+      type: "mrkdwn",
+      text: "*SS-001* · candidate 1/3\nReview this candidate independently.",
+    },
+  },
+  {
+    type: "image",
+    image_url: "https://blob.example/cand-1.jpg",
+    alt_text: "SS-001 candidate 1",
+  },
+  {
+    type: "actions",
+    block_id: "ss_cand_actions:cand-1",
+    elements: [
+      { type: "button", action_id: "ss_approve", text: { type: "plain_text", text: "Approve" }, value: "cand-1" },
+      { type: "button", action_id: "ss_reject", text: { type: "plain_text", text: "Reject" }, value: "cand-1" },
+    ],
+  },
+];
+
 const blockActionPayload = (params: {
   actionId: string;
   value: string;
@@ -48,13 +72,19 @@ const blockActionPayload = (params: {
   teamId?: string;
   channelId?: string;
   messageTs?: string;
+  blocks?: SlackBlock[];
+  responseUrl?: string;
 }) => ({
   type: "block_actions",
   trigger_id: params.triggerId,
   team: { id: params.teamId ?? "T_ALLOWED" },
   channel: { id: params.channelId ?? "C_ALLOWED" },
   user: { id: "U_USER" },
-  message: { ts: params.messageTs ?? "111.222" },
+  message: {
+    ts: params.messageTs ?? "111.222",
+    blocks: params.blocks ?? sampleMessageBlocks(),
+  },
+  response_url: params.responseUrl ?? "https://hooks.slack.com/actions/test",
   actions: [
     {
       action_id: params.actionId,
@@ -67,6 +97,7 @@ const blockActionPayload = (params: {
 const baseDeps = (candidate: GenerationCandidateRow = sampleCandidate()) => {
   const seen = new Set<string>();
   let stored = candidate;
+  const responsePosts: SlackInteractionResponse[] = [];
   const deps: SlackActionDeps = {
     getCandidateById: async (id: string) => (id === stored.id ? stored : null),
     persistCandidateReview: async ({
@@ -118,6 +149,12 @@ const baseDeps = (candidate: GenerationCandidateRow = sampleCandidate()) => {
       seen.add(key);
       return true;
     },
+    releaseAction: (key: string) => {
+      seen.delete(key);
+    },
+    postResponseUrl: async (_url, body) => {
+      responsePosts.push(body);
+    },
     appUrl: "https://studio-shots.example",
     isAllowedTeam: (teamId: string) => teamId === "T_ALLOWED",
     isAllowedChannel: (channelId: string) => channelId === "C_ALLOWED",
@@ -125,6 +162,10 @@ const baseDeps = (candidate: GenerationCandidateRow = sampleCandidate()) => {
   };
   return {
     candidateRef: () => stored,
+    setCandidate: (next: GenerationCandidateRow) => {
+      stored = next;
+    },
+    responsePosts,
     deps,
   };
 };
@@ -149,10 +190,32 @@ test("Slack candidate blocks include image, SKU, candidate number, Approve and R
   assert.match(serialized, new RegExp(SLACK_ACTION_IDS.reject));
 });
 
-test("approval updates Slack message without buttons before persistence finishes", async () => {
+test("finalizeSlackCandidateMessageBlocks strips actions and stamps status", async () => {
+  const { finalizeSlackCandidateMessageBlocks } = await import("@/lib/slack-blocks");
+  const finalized = finalizeSlackCandidateMessageBlocks(sampleMessageBlocks(), "approved");
+  const serialized = JSON.stringify(finalized);
+  assert.doesNotMatch(serialized, /"type":"actions"/);
+  assert.doesNotMatch(serialized, /"text":"Approve"/);
+  assert.match(serialized, /Status: Approved/);
+  assert.match(serialized, /blob\.example\/cand-1\.jpg/);
+});
+
+test("approval updates Slack message without buttons before any DB work", async () => {
   const { handleSlackBlockAction } = await import("@/lib/slack-actions");
   const { SLACK_ACTION_IDS } = await import("@/lib/slack-blocks");
   const ctx = baseDeps();
+  let getStarted = false;
+  let releaseGet!: () => void;
+  const getGate = new Promise<void>((resolve) => {
+    releaseGet = resolve;
+  });
+  const originalGet = ctx.deps.getCandidateById!;
+  ctx.deps.getCandidateById = async (id) => {
+    getStarted = true;
+    await getGate;
+    return originalGet(id);
+  };
+
   let persistStarted = false;
   let releasePersist!: () => void;
   const persistGate = new Promise<void>((resolve) => {
@@ -178,13 +241,22 @@ test("approval updates Slack message without buttons before persistence finishes
   assert.match(result.httpBody.text ?? "", /Status: Approved/);
   assert.doesNotMatch(JSON.stringify(result.httpBody.blocks), /"text":"Approve"/);
   assert.doesNotMatch(JSON.stringify(result.httpBody.blocks), /"text":"Reject"/);
+  assert.doesNotMatch(JSON.stringify(result.httpBody.blocks), /"type":"actions"/);
+  assert.equal(getStarted, false);
+  assert.equal(persistStarted, false);
   assert.equal(ctx.candidateRef().reviewDecision, null);
   assert.ok(result.background);
 
+  const background = result.background!();
+  await Promise.resolve();
+  assert.equal(getStarted, true);
+  releaseGet();
+  await Promise.resolve();
   releasePersist();
-  await result.background!();
+  await background;
   assert.equal(persistStarted, true);
   assert.equal(ctx.candidateRef().reviewDecision, "approved");
+  assert.ok(ctx.responsePosts.some((post) => post.replace_original === true));
 });
 
 test("rejection updates Slack message without buttons before persistence finishes", async () => {
@@ -243,6 +315,9 @@ test("duplicate review clicks are idempotent and do not re-persist", async () =>
     ctx.deps,
   );
   assert.match(second.httpBody.text ?? "", /Approved/);
+  assert.doesNotMatch(JSON.stringify(second.httpBody.blocks), /"text":"Approve"/);
+  assert.ok(second.background);
+  await second.background!();
   assert.equal(persistCalls, 1);
 });
 
@@ -290,7 +365,9 @@ test("a second click while review is in flight is refused without leaving button
 });
 
 test("conflicting decisions are rejected without changing the stored decision", async () => {
-  const { handleSlackBlockAction } = await import("@/lib/slack-actions");
+  const { handleSlackBlockAction, SLACK_INTERACTION_MESSAGES } = await import(
+    "@/lib/slack-actions"
+  );
   const { SLACK_ACTION_IDS } = await import("@/lib/slack-blocks");
   const ctx = baseDeps(
     sampleCandidate({
@@ -308,38 +385,72 @@ test("conflicting decisions are rejected without changing the stored decision", 
     ctx.deps,
   );
 
-  assert.equal(result.httpBody.response_type, "ephemeral");
-  assert.match(result.httpBody.text, /already approved/i);
+  // Immediate ack still removes buttons; conflict is reported via response_url.
+  assert.equal(result.httpBody.replace_original, true);
+  assert.doesNotMatch(JSON.stringify(result.httpBody.blocks), /"text":"Approve"/);
+  assert.ok(result.background);
+  await result.background!();
   assert.equal(ctx.candidateRef().reviewDecision, "approved");
+  assert.ok(
+    ctx.responsePosts.some(
+      (post) =>
+        post.response_type === "ephemeral" &&
+        post.text === SLACK_INTERACTION_MESSAGES.alreadyApproved,
+    ),
+  );
+  assert.ok(
+    ctx.responsePosts.some(
+      (post) =>
+        post.replace_original === true &&
+        /Approved/.test(post.text) &&
+        !JSON.stringify(post.blocks).includes('"text":"Approve"'),
+    ),
+  );
 });
 
-test("stale or missing candidates return clear errors", async () => {
-  const { handleSlackBlockAction } = await import("@/lib/slack-actions");
+test("stale or missing candidates return clear errors via response_url", async () => {
+  const { handleSlackBlockAction, SLACK_INTERACTION_MESSAGES } = await import(
+    "@/lib/slack-actions"
+  );
   const { SLACK_ACTION_IDS } = await import("@/lib/slack-blocks");
 
+  const missingCtx = baseDeps();
+  missingCtx.deps.getCandidateById = async () => null;
   const missing = await handleSlackBlockAction(
     blockActionPayload({
       actionId: SLACK_ACTION_IDS.approve,
       value: "cand-missing",
       triggerId: "trig-missing",
     }),
-    {
-      ...baseDeps().deps,
-      getCandidateById: async () => null,
-    },
+    missingCtx.deps,
   );
-  assert.match(missing.httpBody.text, /could not be found/i);
+  assert.equal(missing.httpBody.replace_original, true);
+  assert.ok(missing.background);
+  await missing.background!();
+  assert.ok(
+    missingCtx.responsePosts.some(
+      (post) => post.text === SLACK_INTERACTION_MESSAGES.missingCandidate,
+    ),
+  );
 
+  const staleCtx = baseDeps(sampleCandidate({ status: "failed", blobUrl: null }));
   const stale = await handleSlackBlockAction(
     blockActionPayload({
       actionId: SLACK_ACTION_IDS.approve,
       value: "cand-1",
       triggerId: "trig-stale",
     }),
-    baseDeps(sampleCandidate({ status: "failed", blobUrl: null })).deps,
+    staleCtx.deps,
   );
-  assert.match(stale.httpBody.text, /no longer available/i);
+  assert.ok(stale.background);
+  await stale.background!();
+  assert.ok(
+    staleCtx.responsePosts.some(
+      (post) => post.text === SLACK_INTERACTION_MESSAGES.staleCandidate,
+    ),
+  );
 
+  const wrongCtx = baseDeps();
   const wrongMessage = await handleSlackBlockAction(
     blockActionPayload({
       actionId: SLACK_ACTION_IDS.approve,
@@ -347,9 +458,15 @@ test("stale or missing candidates return clear errors", async () => {
       triggerId: "trig-wrong-ts",
       messageTs: "999.999",
     }),
-    baseDeps().deps,
+    wrongCtx.deps,
   );
-  assert.match(wrongMessage.httpBody.text, /no longer available/i);
+  assert.ok(wrongMessage.background);
+  await wrongMessage.background!();
+  assert.ok(
+    wrongCtx.responsePosts.some(
+      (post) => post.text === SLACK_INTERACTION_MESSAGES.staleCandidate,
+    ),
+  );
 });
 
 test("unauthorized workspace and channel review actions are refused", async () => {
@@ -383,8 +500,11 @@ test("unauthorized workspace and channel review actions are refused", async () =
 });
 
 test("candidate from another Slack conversation is rejected", async () => {
-  const { handleSlackBlockAction } = await import("@/lib/slack-actions");
+  const { handleSlackBlockAction, SLACK_INTERACTION_MESSAGES } = await import(
+    "@/lib/slack-actions"
+  );
   const { SLACK_ACTION_IDS } = await import("@/lib/slack-blocks");
+  const ctx = baseDeps(sampleCandidate({ conversationId: "C_OTHER" }));
 
   const result = await handleSlackBlockAction(
     blockActionPayload({
@@ -392,9 +512,16 @@ test("candidate from another Slack conversation is rejected", async () => {
       value: "cand-1",
       triggerId: "trig-wrong-convo",
     }),
-    baseDeps(sampleCandidate({ conversationId: "C_OTHER" })).deps,
+    ctx.deps,
   );
-  assert.match(result.httpBody.text, /does not belong to this channel/i);
+  assert.equal(result.httpBody.replace_original, true);
+  assert.ok(result.background);
+  await result.background!();
+  assert.ok(
+    ctx.responsePosts.some(
+      (post) => post.text === SLACK_INTERACTION_MESSAGES.wrongCandidateConversation,
+    ),
+  );
 });
 
 test("request completion notification runs only when newly resolved", async () => {
