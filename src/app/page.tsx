@@ -1,5 +1,4 @@
-import Link from "next/link";
-
+import { GradientButton } from "@/components/gradient-button";
 import { ProductCard, ProductCardGrid } from "@/components/product-card";
 import {
   DEMO_CATALOG_PRODUCTS,
@@ -31,34 +30,32 @@ export default async function HomePage() {
           <h1>{HOME_HERO_TITLE}</h1>
           <p className={styles.lede}>{SITE_DESCRIPTION}</p>
           <div className={styles.ctaRow}>
-            <a className={styles.primaryLink} href={PUBLIC_GITHUB_REPO_URL}>
+            <GradientButton href={PUBLIC_GITHUB_REPO_URL} external>
               View on GitHub
-            </a>
-            <a className={styles.secondaryLink} href={PUBLIC_README_URL}>
+            </GradientButton>
+            <GradientButton href={PUBLIC_README_URL} external>
               README
-            </a>
-            <a className={styles.secondaryLink} href={PUBLIC_ARCHITECTURE_URL}>
+            </GradientButton>
+            <GradientButton href={PUBLIC_ARCHITECTURE_URL} external>
               Architecture
-            </a>
+            </GradientButton>
             {latestCampaign ? (
-              <Link
-                className={styles.primaryLink}
-                href={latestCampaign.campaignPagePath}
-              >
+              <GradientButton href={latestCampaign.campaignPagePath}>
                 Latest campaign
-              </Link>
+              </GradientButton>
             ) : null}
           </div>
           {!latestCampaign ? (
             <p className={styles.hint}>
-              No campaign imported yet. Upload a catalog CSV in Slack and mention @Studio
-              Shots with <code>import</code> to create one.
+              No campaign imported yet. Upload a catalog CSV in Slack and
+              mention @Studio Shots with <code>import</code> to create one.
             </p>
           ) : (
             <p className={styles.hint}>
               Latest import {latestCampaign.importedAtLabel}
-              {latestCampaign.filename ? ` · ${latestCampaign.filename}` : ""}.{" "}
-              {HOME_LATEST_CAMPAIGN_SUFFIX}
+              {latestCampaign.filename
+                ? ` · ${latestCampaign.filename}`
+                : ""}. {HOME_LATEST_CAMPAIGN_SUFFIX}
             </p>
           )}
         </header>
