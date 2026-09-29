@@ -146,6 +146,8 @@ test("import preview Block Kit includes Generate priority, Choose a product, and
   assert.match(serialized, /Choose a product/);
   assert.match(serialized, /Cancel/);
   assert.match(serialized, /per product/);
+  assert.match(serialized, /Aspect ratio/);
+  assert.match(serialized, /4:5/);
   assert.match(serialized, new RegExp(SLACK_ACTION_IDS.priority));
 });
 

@@ -39,6 +39,8 @@ export const createImageRefGeneration = async (params: {
     prompt: params.prompt,
     model: "uni-1",
     image_ref: [{ url: params.photoUrl }],
+    // SDK typings omit 4:5; the Agents API accepts this portrait ratio for image_ref.
+    // @ts-expect-error aspect_ratio union is incomplete in luma-agents
     aspect_ratio: MVP_ASPECT_RATIO,
     output_format: "jpeg",
   });

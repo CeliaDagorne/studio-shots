@@ -9,7 +9,7 @@ import type {
 } from "@/types";
 
 export const IMAGE_REF_COST_USD_MICROS = 43_400;
-export const MVP_ASPECT_RATIO = "3:2";
+export const MVP_ASPECT_RATIO = "4:5";
 export const CANDIDATES_PER_REQUEST = 3;
 
 /** Workflow statuses that still need generation (not yet claimed, reviewed, or closed). */

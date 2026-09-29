@@ -31,6 +31,7 @@ import {
   candidateCaption,
   resolveRequestAfterReviews,
 } from "@/lib/review";
+import { MVP_ASPECT_RATIO } from "@/lib/request-planning";
 import { generationCandidates, imports, products, shotRequests } from "@/lib/schema";
 import {
   editMessageCaption,
@@ -280,7 +281,7 @@ export const runShotRequestGeneration = async (params: {
 
     await notifyConversation(
       params.conversation,
-      `Generating 3 ${claimedRequest.productSku} candidates with image_ref at 3:2 (~$0.13). I'll send each photo when ready.`,
+      `Generating 3 ${claimedRequest.productSku} candidates with image_ref at ${MVP_ASPECT_RATIO} (~$0.13). I'll send each photo when ready.`,
     );
 
     await Promise.all(

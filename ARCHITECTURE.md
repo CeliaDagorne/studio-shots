@@ -10,7 +10,7 @@ Slack: attach CSV + @Studio Shots import
   → shared plan + cost preview (Neon)
   → Generate priority OR Choose a product (paginated)
   → claim request (imported_unconfirmed → generating)
-  → Luma image_ref × 3 (concurrent) @ 3:2
+  → Luma image_ref × 3 (concurrent) @ 4:5
   → download → Vercel Blob
   → Slack Block Kit candidates + Approve/Reject
     (or Telegram photos + inline keyboards)
@@ -42,7 +42,7 @@ Imports, shot requests, and generation candidates store that identity so deliver
 | `src/lib/imports.ts` | Idempotent CSV plan persistence (stable IDs, Neon transaction) |
 | `src/lib/generation.ts` | Atomic claim, Luma pipeline via `waitUntil`, shared `persistCandidateReview` |
 | `src/lib/generation-delivery.ts` | Platform delivery (Slack post vs Telegram send/edit) |
-| `src/lib/luma.ts` | `image_ref` + `uni-1` + aspect `3:2` |
+| `src/lib/luma.ts` | `image_ref` + `uni-1` + aspect `4:5` |
 | `src/lib/blob.ts` | Durable public Blob URLs before chat delivery |
 | `src/lib/products.ts` | Product page query; approved-only filter |
 | `src/lib/status.ts` | Shared campaign aggregates (Telegram `/status` + web overview) |

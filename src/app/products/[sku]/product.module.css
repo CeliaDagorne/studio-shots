@@ -135,7 +135,7 @@
 
 .figureFrame img {
   width: 100%;
-  aspect-ratio: 3 / 2;
+  aspect-ratio: 4 / 5;
   object-fit: cover;
   transition: transform 420ms ease;
 }

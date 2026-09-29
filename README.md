@@ -20,7 +20,7 @@ Telegram exposes the same shared services with `/import`, inline keyboards, and 
 
 - One authorized Slack workspace + channel per deployment (`SLACK_TEAM_ID`, `SLACK_CHANNEL_ID`)
 - One authorized Telegram chat per deployment (`ALLOWED_CHAT_ID`) when Telegram is used
-- Luma as the image-generation provider (`image_ref`, `uni-1`, `3:2`)
+- Luma as the image-generation provider (`image_ref`, `uni-1`, `4:5`)
 - Fixed candidate count (three per request); at least two approvals to mark a product done
 - Fixed per-image cost estimate constant (see [ARCHITECTURE.md](ARCHITECTURE.md))
 - One product generating at a time; no batch / generate-all

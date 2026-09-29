@@ -70,6 +70,7 @@ test("buildImportPreviewText includes up-to-date message only when nothing is ac
   assert.match(pending, /Planned generations: 48/);
   assert.match(pending, /Additional estimated cost \(all ready products\): \$2\.08/);
   assert.match(pending, /Estimated cost per product: \$0\.13 \(3 candidates\)/);
+  assert.match(pending, /Aspect ratio: 4:5/);
   assert.match(pending, /Priority request: SS-001 \(high\)/);
 });
 
