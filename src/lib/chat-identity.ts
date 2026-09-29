@@ -39,10 +39,17 @@ export const parseTelegramMessageId = (externalMessageId: string): number => {
   return Number(externalMessageId);
 };
 
-/** Require Telegram delivery until a Slack adapter exists. */
+/** Require Telegram delivery until a shared messenger is used. */
 export const requireTelegramConversation = (conversation: ChatConversation): number => {
   if (conversation.platform !== CHAT_PLATFORM.telegram) {
     throw new Error(`Chat platform "${conversation.platform}" is not implemented yet`);
   }
   return parseTelegramChatId(conversation.conversationId);
+};
+
+export const requireSlackConversation = (conversation: ChatConversation): string => {
+  if (conversation.platform !== CHAT_PLATFORM.slack) {
+    throw new Error(`Expected slack conversation, got "${conversation.platform}"`);
+  }
+  return conversation.conversationId;
 };

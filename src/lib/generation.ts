@@ -9,10 +9,10 @@ import {
   type ChatConversation,
   parseTelegramMessageId,
   requireTelegramConversation,
-  toExternalMessageId,
 } from "@/lib/chat-identity";
 import { getDb } from "@/lib/db";
 import { env } from "@/lib/env";
+import { deliverCandidateImage, notifyConversation } from "@/lib/generation-delivery";
 import { parseImportWarningsPayload } from "@/lib/import-meta";
 import {
   buildImageRefPrompt,
@@ -35,9 +35,7 @@ import { generationCandidates, imports, products, shotRequests } from "@/lib/sch
 import {
   editMessageCaption,
   removeInlineKeyboard,
-  reviewCandidateKeyboard,
   sendMessage,
-  sendPhoto,
 } from "@/lib/telegram";
 
 const now = () => new Date();
@@ -220,12 +218,11 @@ export const runShotRequestGeneration = async (params: {
   conversation: ChatConversation;
   label?: string;
 }): Promise<{ claimed: boolean }> => {
-  const chatId = requireTelegramConversation(params.conversation);
   const claimedRequest = await claimShotRequestForGeneration(params.shotRequestId);
 
   if (!claimedRequest) {
-    await sendMessage(
-      chatId,
+    await notifyConversation(
+      params.conversation,
       "That product is no longer available to generate — it may already be generating, complete, or cancelled.",
     );
     return { claimed: false };
@@ -271,8 +268,8 @@ export const runShotRequestGeneration = async (params: {
       await db.insert(generationCandidates).values(row);
     }
 
-    await sendMessage(
-      chatId,
+    await notifyConversation(
+      params.conversation,
       `Generating 3 ${claimedRequest.productSku} candidates with image_ref at 3:2 (~$0.13). I'll send each photo when ready.`,
     );
 
@@ -298,29 +295,31 @@ export const runShotRequestGeneration = async (params: {
 
     for (const candidate of ready) {
       if (!candidate.blobUrl) continue;
-      const message = await sendPhoto(
-        chatId,
-        candidate.blobUrl,
-        candidateCaption({
+      const delivered = await deliverCandidateImage({
+        conversation: params.conversation,
+        blobUrl: candidate.blobUrl,
+        caption: candidateCaption({
           sku: candidate.productSku,
           index: candidate.candidateIndex,
           total: PRIORITY_CANDIDATE_COUNT,
         }),
-        reviewCandidateKeyboard(candidate.id),
-      );
-      await db
-        .update(generationCandidates)
-        .set({
-          externalMessageId: toExternalMessageId(message.message_id),
-          updatedAt: now(),
-        })
-        .where(eq(generationCandidates.id, candidate.id));
+        candidateId: candidate.id,
+      });
+      if (delivered.externalMessageId) {
+        await db
+          .update(generationCandidates)
+          .set({
+            externalMessageId: delivered.externalMessageId,
+            updatedAt: now(),
+          })
+          .where(eq(generationCandidates.id, candidate.id));
+      }
     }
 
     if (ready.length === 0) {
       await markRequestStatus(shotRequestId, WORKFLOW.failed);
-      await sendMessage(
-        chatId,
+      await notifyConversation(
+        params.conversation,
         `Generation failed for ${claimedRequest.productSku}: all ${PRIORITY_CANDIDATE_COUNT} candidates failed.${
           failed[0]?.errorMessage ? ` First error: ${failed[0].errorMessage}` : ""
         }`,
@@ -331,13 +330,13 @@ export const runShotRequestGeneration = async (params: {
     await markRequestStatus(shotRequestId, WORKFLOW.awaitingReview);
 
     if (failed.length > 0) {
-      await sendMessage(
-        chatId,
+      await notifyConversation(
+        params.conversation,
         `${claimedRequest.productSku}: ${ready.length} candidate(s) ready for review, ${failed.length} failed. Review the photos above; the request will resolve after every available candidate is approved or rejected.`,
       );
     } else {
-      await sendMessage(
-        chatId,
+      await notifyConversation(
+        params.conversation,
         `${claimedRequest.productSku}: all ${ready.length} candidates are ready. Approve or reject each photo. Done requires at least 2 approvals.`,
       );
     }
@@ -345,8 +344,8 @@ export const runShotRequestGeneration = async (params: {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown generation failure";
     await ensureRequestLeavesGenerating(shotRequestId, WORKFLOW.failed);
-    await sendMessage(
-      chatId,
+    await notifyConversation(
+      params.conversation,
       `Generation crashed for ${label} (request ${shotRequestId}): ${message}`,
     );
     return { claimed: true };
@@ -357,11 +356,10 @@ export const runPriorityGeneration = async (params: {
   importId: string;
   conversation: ChatConversation;
 }): Promise<void> => {
-  const chatId = requireTelegramConversation(params.conversation);
   const request = await findActionablePriorityRequest(params.importId);
   if (!request) {
-    await sendMessage(
-      chatId,
+    await notifyConversation(
+      params.conversation,
       "Priority generation was skipped — no actionable priority request, or it was already claimed.",
     );
     return;

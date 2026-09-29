@@ -1,14 +1,112 @@
 import {
   buildImportPreviewText,
+  estimatedCostMicrosForOneProduct,
   formatPriorityRequestPreviewLine,
+  formatProductPickerButtonText,
   formatUsdMicros,
   hasActionableGenerations,
   IMPORT_UP_TO_DATE_MESSAGE,
   MVP_ASPECT_RATIO,
 } from "@/lib/request-planning";
-import type { RequestPlanSummary } from "@/types";
+import type { ActionableProductOption, RequestPlanSummary } from "@/types";
 
 export type SlackBlock = Record<string, unknown>;
+
+export const SLACK_PRODUCT_PICKER_PAGE_SIZE = 6;
+
+export const SLACK_ACTION_IDS = {
+  priority: "ss_imp_priority",
+  choose: "ss_imp_choose",
+  cancel: "ss_imp_cancel",
+  gen: "ss_imp_gen",
+  page: "ss_imp_page",
+  back: "ss_imp_back",
+} as const;
+
+const VALUE_SEP = "::";
+
+export const encodeSlackImportValue = (importId: string): string => importId;
+
+export const encodeSlackPageValue = (importId: string, page: number): string =>
+  `${importId}${VALUE_SEP}${page}`;
+
+export const encodeSlackGenValue = (
+  importId: string,
+  requestId: string,
+  sku: string,
+): string => `${importId}${VALUE_SEP}${requestId}${VALUE_SEP}${sku}`;
+
+export const parseSlackPageValue = (
+  value: string,
+): { importId: string; page: number } | null => {
+  const idx = value.lastIndexOf(VALUE_SEP);
+  if (idx <= 0) return null;
+  const importId = value.slice(0, idx);
+  const page = Number.parseInt(value.slice(idx + VALUE_SEP.length), 10);
+  if (!importId || !Number.isFinite(page) || page < 0) return null;
+  return { importId, page };
+};
+
+export const parseSlackGenValue = (
+  value: string,
+): { importId: string; requestId: string; sku: string } | null => {
+  const parts = value.split(VALUE_SEP);
+  if (parts.length !== 3) return null;
+  const [importId, requestId, sku] = parts;
+  if (!importId || !requestId || !sku) return null;
+  return { importId, requestId, sku };
+};
+
+const button = (params: {
+  actionId: string;
+  text: string;
+  value: string;
+  style?: "primary" | "danger";
+}) => ({
+  type: "button",
+  action_id: params.actionId,
+  text: { type: "plain_text", text: params.text.slice(0, 75), emoji: true },
+  value: params.value,
+  ...(params.style ? { style: params.style } : {}),
+});
+
+export const buildSlackImportActionElements = (
+  summary: RequestPlanSummary,
+): SlackBlock[] => {
+  if (!hasActionableGenerations(summary)) {
+    return [];
+  }
+
+  const priorityLabel = summary.priorityRequestSku
+    ? `Generate priority: ${summary.priorityRequestSku}`
+    : "Generate priority";
+
+  return [
+    {
+      type: "actions",
+      block_id: `ss_imp_actions:${summary.importId}`,
+      elements: [
+        button({
+          actionId: SLACK_ACTION_IDS.priority,
+          text: priorityLabel,
+          value: encodeSlackImportValue(summary.importId),
+          style: "primary",
+        }),
+        button({
+          actionId: SLACK_ACTION_IDS.choose,
+          text: "Choose a product",
+          value: encodeSlackImportValue(summary.importId),
+        }),
+        button({
+          actionId: SLACK_ACTION_IDS.cancel,
+          text: "Cancel",
+          value: encodeSlackImportValue(summary.importId),
+          style: "danger",
+        }),
+      ],
+    },
+  ];
+};
 
 /**
  * Block Kit preview for a catalog import. Content mirrors buildImportPreviewText
@@ -16,8 +114,9 @@ export type SlackBlock = Record<string, unknown>;
  */
 export const buildSlackImportPreviewBlocks = (
   summary: RequestPlanSummary,
-  options?: { campaignPageUrl?: string | null },
+  options?: { campaignPageUrl?: string | null; includeActions?: boolean },
 ): SlackBlock[] => {
+  const includeActions = options?.includeActions !== false;
   const warningText =
     summary.warnings.length === 0
       ? "_None_"
@@ -123,10 +222,13 @@ export const buildSlackImportPreviewBlocks = (
       elements: [
         {
           type: "mrkdwn",
-          text: `${formatPriorityRequestPreviewLine(summary)}. Product selection and generation in Slack are coming next — Telegram remains fully supported.`,
+          text: `${formatPriorityRequestPreviewLine(summary)}. Choose priority generation or pick any actionable SKU.`,
         },
       ],
     });
+    if (includeActions) {
+      blocks.push(...buildSlackImportActionElements(summary));
+    }
   }
 
   return blocks;
@@ -136,3 +238,135 @@ export const buildSlackImportPreviewFallbackText = (
   summary: RequestPlanSummary,
   options?: { campaignPageUrl?: string | null },
 ): string => buildImportPreviewText(summary, options);
+
+export const buildSlackProductPickerBlocks = (params: {
+  importId: string;
+  products: ActionableProductOption[];
+  page: number;
+  pageSize?: number;
+}): { text: string; blocks: SlackBlock[] } => {
+  const pageSize = params.pageSize ?? SLACK_PRODUCT_PICKER_PAGE_SIZE;
+  const total = params.products.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(Math.max(params.page, 0), totalPages - 1);
+  const start = safePage * pageSize;
+  const pageItems = params.products.slice(start, start + pageSize);
+  const cost = formatUsdMicros(estimatedCostMicrosForOneProduct());
+
+  const text = [
+    "Choose a product to generate",
+    "",
+    `Actionable products: ${total}`,
+    `Estimated cost per product: ${cost} (3 candidates)`,
+    `Page ${safePage + 1} of ${totalPages}`,
+  ].join("\n");
+
+  const blocks: SlackBlock[] = [
+    {
+      type: "header",
+      text: { type: "plain_text", text: "Choose a product", emoji: true },
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*Actionable products:* ${total}\n*Estimated cost per product:* ${cost} (3 candidates)\n*Page ${safePage + 1} of ${totalPages}*`,
+      },
+    },
+  ];
+
+  for (const option of pageItems) {
+    blocks.push({
+      type: "actions",
+      block_id: `ss_imp_gen:${option.requestId}`,
+      elements: [
+        button({
+          actionId: SLACK_ACTION_IDS.gen,
+          text: formatProductPickerButtonText(option),
+          value: encodeSlackGenValue(params.importId, option.requestId, option.sku),
+        }),
+      ],
+    });
+  }
+
+  const navElements = [];
+  if (safePage > 0) {
+    navElements.push(
+      button({
+        actionId: SLACK_ACTION_IDS.page,
+        text: "Previous",
+        value: encodeSlackPageValue(params.importId, safePage - 1),
+      }),
+    );
+  }
+  if (safePage < totalPages - 1) {
+    navElements.push(
+      button({
+        actionId: SLACK_ACTION_IDS.page,
+        text: "Next",
+        value: encodeSlackPageValue(params.importId, safePage + 1),
+      }),
+    );
+  }
+  if (navElements.length > 0) {
+    blocks.push({
+      type: "actions",
+      block_id: `ss_imp_nav:${params.importId}`,
+      elements: navElements,
+    });
+  }
+
+  blocks.push({
+    type: "actions",
+    block_id: `ss_imp_picker_footer:${params.importId}`,
+    elements: [
+      button({
+        actionId: SLACK_ACTION_IDS.back,
+        text: "Back",
+        value: encodeSlackImportValue(params.importId),
+      }),
+      button({
+        actionId: SLACK_ACTION_IDS.cancel,
+        text: "Cancel",
+        value: encodeSlackImportValue(params.importId),
+        style: "danger",
+      }),
+    ],
+  });
+
+  return { text, blocks };
+};
+
+export const buildSlackCancelledPreviewBlocks = (
+  summary: RequestPlanSummary,
+  options?: { campaignPageUrl?: string | null },
+): SlackBlock[] => [
+  ...buildSlackImportPreviewBlocks(summary, {
+    ...options,
+    includeActions: false,
+  }),
+  {
+    type: "context",
+    elements: [{ type: "mrkdwn", text: "*Cancelled.* No generation was started." }],
+  },
+];
+
+export const buildSlackGenerationStartedBlocks = (
+  summary: RequestPlanSummary,
+  label: string,
+  options?: { campaignPageUrl?: string | null },
+): SlackBlock[] => [
+  ...buildSlackImportPreviewBlocks(summary, {
+    ...options,
+    includeActions: false,
+  }),
+  {
+    type: "context",
+    elements: [
+      {
+        type: "mrkdwn",
+        text: `*Confirmed:* generating ${label} in the background.`,
+      },
+    ],
+  },
+];
