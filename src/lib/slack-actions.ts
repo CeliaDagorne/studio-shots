@@ -34,6 +34,7 @@ import {
   buildSlackImportPreviewBlocks,
   buildSlackImportPreviewFallbackText,
   buildSlackProductPickerBlocks,
+  buildSlackProductPickerLoadingBlocks,
   finalizeSlackCandidateMessageBlocks,
   parseSlackGenValue,
   parseSlackPageValue,
@@ -245,6 +246,74 @@ export const handleSlackBlockAction = async (
     return { ok: true as const, record };
   };
 
+  const deliverProductPicker = async (
+    importId: string,
+    page: number,
+    responseUrl: string | undefined,
+  ) => {
+    if (!responseUrl) {
+      return;
+    }
+
+    const loaded = await loadAuthorizedImport(importId);
+    if (!loaded.ok) {
+      await postResponseUrl(responseUrl, ephemeral(loaded.message));
+      return;
+    }
+
+    const actionable = await loadStillActionable(loaded.record);
+    if (actionable.length === 0) {
+      const summary = importRecordToSummary(loaded.record);
+      const campaignPageUrl = campaignUrlFor(loaded.record.id);
+      await postResponseUrl(responseUrl, {
+        replace_original: true,
+        text: `${buildSlackImportPreviewFallbackText(summary, { campaignPageUrl })}\n\n${selectionErrorMessage("unavailable")}`,
+        blocks: [
+          ...buildSlackImportPreviewBlocks(summary, { campaignPageUrl }),
+          {
+            type: "context",
+            elements: [
+              {
+                type: "mrkdwn",
+                text: `*${selectionErrorMessage("unavailable")}*`,
+              },
+            ],
+          },
+        ],
+      });
+      return;
+    }
+
+    const picker = buildSlackProductPickerBlocks({
+      importId: loaded.record.id,
+      products: actionable,
+      page,
+    });
+    await postResponseUrl(responseUrl, {
+      replace_original: true,
+      text: picker.text,
+      blocks: picker.blocks,
+    });
+  };
+
+  const beginProductPicker = (
+    importId: string,
+    page: number,
+    responseUrl: string | undefined,
+  ): SlackInteractionHandleResult => {
+    const loading = buildSlackProductPickerLoadingBlocks(importId);
+    return {
+      httpBody: {
+        replace_original: true,
+        text: loading.text,
+        blocks: loading.blocks,
+      },
+      background: async () => {
+        await deliverProductPicker(importId, page, responseUrl);
+      },
+    };
+  };
+
   if (action.action_id === SLACK_ACTION_IDS.cancel) {
     const loaded = await loadAuthorizedImport(action.value);
     if (!loaded.ok) {
@@ -262,26 +331,7 @@ export const handleSlackBlockAction = async (
   }
 
   if (action.action_id === SLACK_ACTION_IDS.choose) {
-    const loaded = await loadAuthorizedImport(action.value);
-    if (!loaded.ok) {
-      return { httpBody: ephemeral(loaded.message) };
-    }
-    const actionable = await loadStillActionable(loaded.record);
-    if (actionable.length === 0) {
-      return { httpBody: ephemeral(selectionErrorMessage("unavailable")) };
-    }
-    const picker = buildSlackProductPickerBlocks({
-      importId: loaded.record.id,
-      products: actionable,
-      page: 0,
-    });
-    return {
-      httpBody: {
-        replace_original: true,
-        text: picker.text,
-        blocks: picker.blocks,
-      },
-    };
+    return beginProductPicker(action.value, 0, payload.response_url);
   }
 
   if (action.action_id === SLACK_ACTION_IDS.page) {
@@ -289,23 +339,7 @@ export const handleSlackBlockAction = async (
     if (!parsed) {
       return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.unknownAction) };
     }
-    const loaded = await loadAuthorizedImport(parsed.importId);
-    if (!loaded.ok) {
-      return { httpBody: ephemeral(loaded.message) };
-    }
-    const actionable = await loadStillActionable(loaded.record);
-    const picker = buildSlackProductPickerBlocks({
-      importId: loaded.record.id,
-      products: actionable,
-      page: parsed.page,
-    });
-    return {
-      httpBody: {
-        replace_original: true,
-        text: picker.text,
-        blocks: picker.blocks,
-      },
-    };
+    return beginProductPicker(parsed.importId, parsed.page, payload.response_url);
   }
 
   if (action.action_id === SLACK_ACTION_IDS.back) {

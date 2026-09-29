@@ -15,7 +15,22 @@ import type { ActionableProductOption, RequestPlanSummary } from "@/types";
 
 export type SlackBlock = Record<string, unknown>;
 
+/** Slack allows at most 5 `actions` blocks and 5 buttons per block in a message. */
+export const SLACK_MAX_ACTIONS_BLOCKS_PER_MESSAGE = 5;
+export const SLACK_MAX_BUTTONS_PER_ACTIONS_BLOCK = 5;
+
 export const SLACK_PRODUCT_PICKER_PAGE_SIZE = 6;
+
+export const countSlackActionBlocks = (blocks: SlackBlock[]): number =>
+  blocks.filter((block) => block.type === "actions").length;
+
+const chunkSlackPickerProducts = <T>(items: T[], size: number): T[][] => {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+};
 
 export const SLACK_ACTION_IDS = {
   priority: "ss_imp_priority",
@@ -242,6 +257,36 @@ export const buildSlackImportPreviewFallbackText = (
   options?: { campaignPageUrl?: string | null },
 ): string => buildImportPreviewText(summary, options);
 
+export const buildSlackProductPickerLoadingBlocks = (
+  importId: string,
+): { text: string; blocks: SlackBlock[] } => ({
+  text: "Choose a product to generate\n\nLoading actionable products…",
+  blocks: [
+    {
+      type: "header",
+      text: { type: "plain_text", text: "Choose a product", emoji: true },
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: "_Loading actionable products…_",
+      },
+    },
+    {
+      type: "actions",
+      block_id: `ss_imp_picker_loading:${importId}`,
+      elements: [
+        button({
+          actionId: SLACK_ACTION_IDS.back,
+          text: "Back",
+          value: encodeSlackImportValue(importId),
+        }),
+      ],
+    },
+  ],
+});
+
 export const buildSlackProductPickerBlocks = (params: {
   importId: string;
   products: ActionableProductOption[];
@@ -278,17 +323,20 @@ export const buildSlackProductPickerBlocks = (params: {
     },
   ];
 
-  for (const option of pageItems) {
+  for (const [chunkIndex, group] of chunkSlackPickerProducts(
+    pageItems,
+    SLACK_MAX_BUTTONS_PER_ACTIONS_BLOCK,
+  ).entries()) {
     blocks.push({
       type: "actions",
-      block_id: `ss_imp_gen:${option.requestId}`,
-      elements: [
+      block_id: `ss_imp_gen:${params.importId}:${safePage}:${chunkIndex}`,
+      elements: group.map((option) =>
         button({
           actionId: SLACK_ACTION_IDS.gen,
           text: formatProductPickerButtonText(option),
           value: encodeSlackGenValue(params.importId, option.requestId, option.sku),
         }),
-      ],
+      ),
     });
   }
 

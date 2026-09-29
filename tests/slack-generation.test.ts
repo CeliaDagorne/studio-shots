@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import test from "node:test";
 
+import type { SlackInteractionResponse } from "@/lib/slack-actions";
 import type { ImportRow } from "@/lib/schema";
 import type { ActionableProductOption, RequestPlanSummary } from "@/types";
 
@@ -94,6 +95,7 @@ const blockActionPayload = (params: {
   triggerId: string;
   teamId?: string;
   channelId?: string;
+  responseUrl?: string;
 }) => ({
   type: "block_actions",
   trigger_id: params.triggerId,
@@ -101,6 +103,7 @@ const blockActionPayload = (params: {
   channel: { id: params.channelId ?? "C_ALLOWED" },
   user: { id: "U_USER" },
   message: { ts: "111.222" },
+  response_url: params.responseUrl ?? "https://hooks.slack.com/actions/test",
   actions: [
     {
       action_id: params.actionId,
@@ -112,7 +115,8 @@ const blockActionPayload = (params: {
 
 const baseDeps = () => {
   const seen = new Set<string>();
-  return {
+  const responsePosts: SlackInteractionResponse[] = [];
+  const deps = {
     getImportById: async () => sampleImportRow(),
     listActionableProductsForImport: () => sampleSummary().actionableProducts,
     loadStillActionableProductsForImport: async () => sampleSummary().actionableProducts,
@@ -130,10 +134,14 @@ const baseDeps = () => {
       seen.add(key);
       return true;
     },
+    postResponseUrl: async (_url: string, body: SlackInteractionResponse) => {
+      responsePosts.push(body);
+    },
     appUrl: "https://studio-shots.example",
     isAllowedTeam: (teamId: string) => teamId === "T_ALLOWED",
     isAllowedChannel: (channelId: string) => channelId === "C_ALLOWED",
   };
+  return { deps, responsePosts };
 };
 
 test("import preview Block Kit includes Generate priority, Choose a product, and Cancel", async () => {
@@ -149,6 +157,30 @@ test("import preview Block Kit includes Generate priority, Choose a product, and
   assert.match(serialized, /Aspect ratio/);
   assert.match(serialized, /4:5/);
   assert.match(serialized, new RegExp(SLACK_ACTION_IDS.priority));
+});
+
+test("product picker stays within Slack action block limits", async () => {
+  const {
+    buildSlackProductPickerBlocks,
+    countSlackActionBlocks,
+    SLACK_MAX_ACTIONS_BLOCKS_PER_MESSAGE,
+    SLACK_PRODUCT_PICKER_PAGE_SIZE,
+  } = await import("@/lib/slack-blocks");
+  const products: ActionableProductOption[] = Array.from({ length: 8 }, (_, index) => ({
+    requestId: `req-${index}`,
+    sku: `SS-${String(index + 1).padStart(3, "0")}`,
+    priority: "normal" as const,
+  }));
+  const page0 = buildSlackProductPickerBlocks({
+    importId: "import-aaa",
+    products,
+    page: 0,
+    pageSize: SLACK_PRODUCT_PICKER_PAGE_SIZE,
+  });
+  assert.ok(
+    countSlackActionBlocks(page0.blocks) <= SLACK_MAX_ACTIONS_BLOCKS_PER_MESSAGE,
+    `expected at most ${SLACK_MAX_ACTIONS_BLOCKS_PER_MESSAGE} action blocks`,
+  );
 });
 
 test("product picker paginates with SKU, priority, and estimated cost", async () => {
@@ -195,7 +227,7 @@ test("priority generation action starts the shared generation path", async () =>
       triggerId: "trig-priority-1",
     }),
     {
-      ...baseDeps(),
+      ...baseDeps().deps,
       runPriorityGeneration: async (params) => {
         priorityCalls += 1;
         assert.equal(params.importId, "import-aaa");
@@ -223,7 +255,7 @@ test("manual SKU selection validates request id and sku server-side", async () =
       triggerId: "trig-gen-1",
     }),
     {
-      ...baseDeps(),
+      ...baseDeps().deps,
       runSelectedRequestGeneration: async (params) => {
         selectedCalls += 1;
         assert.equal(params.shotRequestId, "req-normal");
@@ -241,7 +273,7 @@ test("manual SKU selection validates request id and sku server-side", async () =
       value: encodeSlackGenValue("import-aaa", "req-normal", "SS-HACKED"),
       triggerId: "trig-gen-mismatch",
     }),
-    baseDeps(),
+    baseDeps().deps,
   );
   assert.match(mismatch.httpBody.text, /does not match/i);
   assert.equal(mismatch.background, undefined);
@@ -257,7 +289,7 @@ test("cancel updates the Slack message without changing the import", async () =>
       value: "import-aaa",
       triggerId: "trig-cancel-1",
     }),
-    baseDeps(),
+    baseDeps().deps,
   );
   assert.match(result.httpBody.text, /Cancelled/);
   assert.equal(result.httpBody.replace_original, true);
@@ -267,7 +299,7 @@ test("cancel updates the Slack message without changing the import", async () =>
 test("duplicate Slack interaction trigger ids are ignored", async () => {
   const { handleSlackBlockAction } = await import("@/lib/slack-actions");
   const { SLACK_ACTION_IDS } = await import("@/lib/slack-blocks");
-  const deps = baseDeps();
+  const { deps } = baseDeps();
 
   const payload = blockActionPayload({
     actionId: SLACK_ACTION_IDS.cancel,
@@ -291,7 +323,7 @@ test("stale imports and invalid SKUs are rejected", async () => {
       triggerId: "trig-stale",
     }),
     {
-      ...baseDeps(),
+      ...baseDeps().deps,
       getImportById: async () => null,
     },
   );
@@ -304,7 +336,7 @@ test("stale imports and invalid SKUs are rejected", async () => {
       triggerId: "trig-invalid-sku",
     }),
     {
-      ...baseDeps(),
+      ...baseDeps().deps,
       getShotRequestById: async () => null,
     },
   );
@@ -322,7 +354,7 @@ test("unauthorized workspace and channel actions return ephemeral refusals", asy
       triggerId: "trig-team",
       teamId: "T_OTHER",
     }),
-    baseDeps(),
+    baseDeps().deps,
   );
   assert.match(team.httpBody.text, /workspace/i);
   assert.equal(team.httpBody.response_type, "ephemeral");
@@ -334,7 +366,7 @@ test("unauthorized workspace and channel actions return ephemeral refusals", asy
       triggerId: "trig-channel",
       channelId: "C_OTHER",
     }),
-    baseDeps(),
+    baseDeps().deps,
   );
   assert.match(channel.httpBody.text, /channel/i);
   assert.equal(channel.httpBody.response_type, "ephemeral");
@@ -352,7 +384,7 @@ test("wrong-channel import ownership is rejected even with a valid import id", a
       channelId: "C_ALLOWED",
     }),
     {
-      ...baseDeps(),
+      ...baseDeps().deps,
       getImportById: async () => sampleImportRow({ conversationId: "C_OTHER_IMPORT_CHANNEL" }),
     },
   );
@@ -362,6 +394,7 @@ test("wrong-channel import ownership is rejected even with a valid import id", a
 test("choose action opens a paginated product picker", async () => {
   const { handleSlackBlockAction } = await import("@/lib/slack-actions");
   const { SLACK_ACTION_IDS } = await import("@/lib/slack-blocks");
+  const ctx = baseDeps();
 
   const result = await handleSlackBlockAction(
     blockActionPayload({
@@ -369,11 +402,17 @@ test("choose action opens a paginated product picker", async () => {
       value: "import-aaa",
       triggerId: "trig-choose-1",
     }),
-    baseDeps(),
+    ctx.deps,
   );
-  assert.match(result.httpBody.text, /Choose a product to generate/);
-  assert.match(JSON.stringify(result.httpBody.blocks), /SS-001 · high/);
-  assert.match(JSON.stringify(result.httpBody.blocks), /SS-002 · normal/);
+  assert.match(result.httpBody.text, /Loading actionable products/);
+  assert.ok(result.background);
+  await result.background!();
+
+  const delivered = ctx.responsePosts.find((post) => post.replace_original === true);
+  assert.ok(delivered);
+  assert.match(delivered.text ?? "", /Choose a product to generate/);
+  assert.match(JSON.stringify(delivered.blocks), /SS-001 · high/);
+  assert.match(JSON.stringify(delivered.blocks), /SS-002 · normal/);
 });
 
 test("interactions route verifies signatures and parses form-encoded payloads", async () => {
