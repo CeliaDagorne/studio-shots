@@ -1,52 +1,86 @@
 # Architecture
 
-Studio Shots turns catalog shot ideas into reviewer-approved lifestyle images without a separate dashboard.
+Studio Shots turns catalog shot ideas into reviewer-approved lifestyle images through a **chat-first** workflow. Slack is the primary adapter; Telegram is a supported secondary adapter. Both call the same shared import, planning, generation, and review services. The companion website is read-only.
 
 ## High-level flow
 
 ```text
-CSV (/import in Telegram)
-  → plan + cost preview (Neon)
+Slack: attach CSV + @Studio Shots import
+  (or Telegram: CSV caption /import)
+  → shared plan + cost preview (Neon)
   → Generate priority OR Choose a product (paginated)
   → claim request (imported_unconfirmed → generating)
   → Luma image_ref × 3 (concurrent) @ 3:2
   → download → Vercel Blob
-  → Telegram photos + Approve/Reject
+  → Slack Block Kit candidates + Approve/Reject
+    (or Telegram photos + inline keyboards)
   → ≥2 approvals → approved + product page URL
   → /products/[sku] shows approved Blob images only
   → /campaigns/[importId] read-only web overview
-  → /status for campaign rollup + estimated spend
+  → Slack completion message / Telegram /status rollup
 ```
+
+## Shared identity model
+
+Chat work is keyed by platform-neutral conversation identity (`src/lib/chat-identity.ts`):
+
+| Field | Meaning |
+|---|---|
+| `platform` | `"slack"` or `"telegram"` |
+| `conversationId` | Slack channel id, or Telegram chat id as a string |
+
+Imports, shot requests, and generation candidates store that identity so delivery and authorization stay scoped to the originating conversation. External event ids are also platform-scoped (`stableImportId(platform, externalEventId)`, unique on `(platform, external_event_id)`).
 
 ## Components
 
 | Piece | Role |
 |---|---|
-| `POST /api/telegram/webhook` | Authenticated Telegram updates (`x-telegram-bot-api-secret-token`); chat allowlist |
-| `src/lib/imports.ts` | Idempotent CSV plan persistence (Telegram `update_id`, stable IDs, Neon transaction) |
-| `src/lib/generation.ts` | Atomic claim, Luma pipeline via `waitUntil`, review resolution |
+| `POST /api/slack/events` | Slack Events API; signature verify; `event_id` dedupe; app_mention → help or import |
+| `POST /api/slack/interactions` | Slack Block Kit actions; signature verify; preview / picker / generate / review |
+| `POST /api/telegram/webhook` | Telegram updates; `x-telegram-bot-api-secret-token`; chat allowlist |
+| `src/lib/chat-identity.ts` | Shared `platform` + `conversationId` helpers |
+| `src/lib/imports.ts` | Idempotent CSV plan persistence (stable IDs, Neon transaction) |
+| `src/lib/generation.ts` | Atomic claim, Luma pipeline via `waitUntil`, shared `persistCandidateReview` |
+| `src/lib/generation-delivery.ts` | Platform delivery (Slack post vs Telegram send/edit) |
 | `src/lib/luma.ts` | `image_ref` + `uni-1` + aspect `3:2` |
 | `src/lib/blob.ts` | Durable public Blob URLs before chat delivery |
 | `src/lib/products.ts` | Product page query; approved-only filter |
-| `src/lib/status.ts` | Shared campaign aggregates for `/status` and web overview |
+| `src/lib/status.ts` | Shared campaign aggregates (Telegram `/status` + web overview) |
 | `src/lib/campaigns.ts` | Campaign page assembly, demo catalog, public URLs |
 | `src/lib/assets.ts` | Join root-relative `/demo/...` paths to `APP_URL` for external APIs |
 
-## Import safety
+Both adapters invoke the same planning (`imports.ts` / request planning), generation claim + pipeline, and review persistence. UI-only code lives in Slack Block Kit builders / Telegram keyboards.
+
+## Auth and idempotency
+
+### Slack
+
+- Every Events and Interactivity request is verified with the Slack signing secret (`src/lib/slack-verify.ts`): HMAC over `v0:{timestamp}:{rawBody}`, with a max timestamp age.
+- Unauthorized `team_id` / channel id are ignored or refused without running shared services.
+- Slack `event_id` values are claimed once in-process (`claimSlackEventId`) so duplicate deliveries do not re-run import or help.
+- Interaction `trigger_id`s are similarly claimed so repeated button clicks stay idempotent at the edge; review persistence also uses an atomic `review_decision IS NULL` update.
+
+### Telegram
+
+- Webhook requests must present `TELEGRAM_WEBHOOK_SECRET` via `x-telegram-bot-api-secret-token`.
+- Only `ALLOWED_CHAT_ID` may import, generate, or review.
+- Import idempotency keys off Telegram `update_id` as `external_event_id` for platform `telegram`.
+
+### Shared import safety
 
 - Parent `imports` row is written with dependent products/shot requests in one Neon HTTP transaction batch.
-- Duplicate Telegram deliveries of the same `update_id` do not create duplicate imports.
+- Duplicate deliveries of the same `(platform, external_event_id)` do not create duplicate imports.
 - Shot requests are keyed by `(sku, request_hash)` so identical re-imports stay idempotent.
 - “Unchanged” catalog rows can still be **actionable** if their workflow status is `imported_unconfirmed`.
 
 ## Generation safety
 
 - A request is claimed atomically before any paid Luma call.
-- Work continues after the webhook returns `200` (`waitUntil`, `maxDuration` on the route).
-- Candidate images are stored on Blob; Telegram receives Blob URLs (not short-lived Luma URLs).
+- Work continues after the HTTP ack returns (`waitUntil`, `maxDuration` on routes).
+- Candidate images are stored on Blob; chat receives Blob URLs (not short-lived Luma URLs).
 - One product is generated per confirm action in v1.
-- Import preview offers a priority shortcut plus a paginated product picker (6 SKUs per page). Callbacks carry stable import/request IDs only.
-- Stale picker taps (already generating / complete / not in this import) get a clear callback error and do not call Luma.
+- Import preview offers a priority shortcut plus a paginated product picker. Callbacks / action values carry stable import/request IDs only.
+- Stale picker taps (already generating / complete / not in this import) get a clear error and do not call Luma.
 
 ## Review rules
 
@@ -54,23 +88,28 @@ CSV (/import in Telegram)
 - After every ready candidate has a decision: **approved** if ≥2 approvals, else **needs_regeneration**.
 - Failed candidates are excluded from the approval count but reported in chat.
 - Completing as approved sends the public product page URL (and campaign overview URL when known) built from `APP_URL`.
+- Slack updates the original candidate message to Approved/Rejected and removes buttons; Telegram edits the caption and removes the inline keyboard. Neither path auto-regenerates after rejection.
 
 ## Public site
 
-- `/` — Telegram-first product story, four-step workflow, demo catalog, GitHub/docs links, and a link to the latest campaign when one exists (works with no imports yet).
+- `/` — Slack-primary product story, four-step workflow, demo catalog, GitHub/docs links, and a link to the latest campaign when one exists (works with no imports yet). Telegram is noted as also supported.
 - `/campaigns/[importId]` — read-only campaign totals and product grid (priority, status, approved counts, product links).
 - `/products/[sku]` — metadata, original catalog photo, approved styled shots + downloads.
 - Unknown campaigns/SKUs → not-found; products with no approvals → empty gallery state.
-- Generation and review actions stay in Telegram; the website never exposes secrets or provider IDs.
+- Generation and review actions stay in chat; the website never exposes secrets or provider IDs.
 
 ## Cost model (estimate)
 
-Configured as integer micros USD per `image_ref` image (`IMAGE_REF_COST_USD_MICROS`, currently $0.0434). Preview and `/status` use that constant × candidates generated. Treat it as an estimate and update when provider pricing changes.
-
-## Near-term product work
-
-None currently queued beyond polish and a fresh production deploy when credentials are ready.
+Configured as integer micros USD per `image_ref` image (`IMAGE_REF_COST_USD_MICROS`, currently $0.0434). Preview and status views use that constant × candidates generated. Treat it as an estimate and update when provider pricing changes.
 
 ## Out of scope (v1)
 
-Bulk generate-all, multi-tenant / multi-chat, CMS publishing, `/export` zip, automatic regeneration queues.
+| Limit | Notes |
+|---|---|
+| Bulk generate-all / parallel multi-SKU | Spend and review load |
+| Multi-tenant / multi-workspace / multi-channel | One Slack team+channel and one Telegram chat per deploy |
+| Slack Marketplace distribution | Single-workspace install via manifest |
+| CMS auto-publish | Weekly human upload remains the handoff |
+| Auto-regeneration on `needs_regeneration` | Explicit confirm keeps cost predictable |
+| `/export` zip | Product page downloads are enough for v1 |
+| Variable candidate count / model / pricing UI | Fixed `uni-1`, three candidates, constant cost estimate |

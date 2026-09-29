@@ -2,13 +2,21 @@
 
 Product and engineering choices behind Studio Shots.
 
-## Chat surface: Telegram
+## Chat surface: Slack-primary, Telegram secondary
 
-**Decision:** Ship review and import in Telegram, not a web dashboard or Slack-first bot.
+**Decision:** Ship import, generation, and review through chat adapters — primarily Slack — with Telegram as a supported secondary channel. Do not build a web dashboard for generation or review.
 
-**Why:** Reviewers already work from their phone in chat. Privacy mode, document captions, and inline keyboards are well understood; a new admin UI would fight adoption.
+**Why:** Reviewers already work in team chat. Slack is where most catalog and e-commerce teams collaborate; Telegram remains useful for lightweight or phone-first deployments. A new admin UI would fight adoption without improving the review loop.
 
-**Impact:** Webhook bot, `/import` caption requirement, allowlisted `ALLOWED_CHAT_ID`, Approve/Reject keyboards.
+**Impact:** Slack Events + Interactivity routes (`/api/slack/events`, `/api/slack/interactions`), Block Kit preview/picker/review, allowlisted `SLACK_TEAM_ID` / `SLACK_CHANNEL_ID`. Telegram webhook + `/import` caption + inline keyboards remain available on the same shared services. The website stays read-only.
+
+## Shared services behind platform adapters
+
+**Decision:** Keep import planning, generation claim/pipeline, and candidate review persistence platform-neutral. Slack and Telegram are thin adapters over `platform` + `conversationId` identity.
+
+**Why:** One product loop should not fork into two business logics. Adapter-specific code should stop at auth, message formatting, and delivery.
+
+**Impact:** `chat-identity.ts`, shared `imports.ts` / `generation.ts` / `persistCandidateReview`, and `generation-delivery.ts` branching only at send/edit time. Idempotency is keyed by `(platform, external_event_id)`.
 
 ## Done means multiple approved images
 
@@ -36,19 +44,19 @@ Product and engineering choices behind Studio Shots.
 
 ## Durable storage before chat
 
-**Decision:** Download completed Luma outputs to Vercel Blob, then send Blob URLs to Telegram and the product page.
+**Decision:** Download completed Luma outputs to Vercel Blob, then send Blob URLs to chat and the product page.
 
 **Why:** Provider URLs expire. Chat history is a poor archive for the e-commerce team’s weekly upload.
 
 **Impact:** Blob paths `candidates/{sku}/{candidateId}.jpg`; downloads on `/products/[sku]`.
 
-## Status lives in chat (with a read-only web overview)
+## Status in chat, plus a read-only web overview
 
-**Decision:** Operators track progress primarily with Telegram `/status`. A public `/campaigns/[importId]` page mirrors the same aggregates for stakeholders who need a browser view—without web generation or review actions.
+**Decision:** Operators get progress from chat (Slack completion / campaign links; Telegram `/status`) and a public `/campaigns/[importId]` page that mirrors the same aggregates — without web generation or review actions.
 
 **Why:** Visibility without interrupting reviewers or inventing another login. Chat remains the control surface; the website stays read-only.
 
-**Impact:** `status.ts` aggregates products, pipeline stages, candidates, spend, and approved product page links. `campaigns.ts` reuses that aggregation for the campaign page. Import/`/status` messages include the campaign URL when available.
+**Impact:** `status.ts` aggregates products, pipeline stages, candidates, spend, and approved product page links. `campaigns.ts` reuses that aggregation for the campaign page. Import and completion messages include the campaign URL when available.
 
 ## Generation method: `image_ref` at 3:2
 
@@ -63,10 +71,12 @@ Product and engineering choices behind Studio Shots.
 | Deferred | Reason |
 |---|---|
 | Generate-all / parallel multi-SKU runs | Spend and review load |
-| Multi-tenant / multi-chat | One deployment = one team chat |
+| Multi-tenant / multi-workspace / multi-channel | One Slack team+channel and one Telegram chat per deploy |
+| Slack Marketplace distribution | Manifest install for a single workspace |
 | CMS auto-publish | Weekly human upload remains the handoff |
 | Auto-regeneration on `needs_regeneration` | Explicit confirm keeps cost predictable |
 | `/export` zip | Product page downloads are enough for v1 |
+| Configurable candidate count / model / live pricing | Fixed pipeline keeps cost predictable |
 
 ## Open questions
 
