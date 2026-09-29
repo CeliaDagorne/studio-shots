@@ -1,8 +1,9 @@
 {
   "display_information": {
     "name": "Studio Shots",
-    "description": "Telegram-first styled product photography for catalog teams. Slack foundation for mentions and future workflows.",
-    "background_color": "#6b5b95"
+    "description": "Generate, review and approve AI product lifestyle images directly in Slack.",
+    "background_color": "#7d5a9e",
+    "long_description": "Studio Shots helps e-commerce and content teams create product lifestyle images without leaving Slack. Upload a product catalog, choose a product and generate image candidates based on its photo and shot idea. The team can review, approve or reject the results directly in the channel, while Studio Shots tracks progress and estimated generation costs. Approved images are also available in the companion web app."
   },
   "features": {
     "bot_user": {
@@ -12,23 +13,17 @@
   },
   "oauth_config": {
     "scopes": {
-      "bot": [
-        "app_mentions:read",
-        "chat:write",
-        "files:read"
-      ]
+      "bot": ["app_mentions:read", "chat:write", "files:read"]
     }
   },
   "settings": {
     "event_subscriptions": {
-      "request_url": "https://your-vercel-deployment.vercel.app/api/slack/events",
-      "bot_events": [
-        "app_mention"
-      ]
+      "request_url": "https://studio-shots.vercel.app/api/slack/events",
+      "bot_events": ["app_mention"]
     },
     "interactivity": {
       "is_enabled": true,
-      "request_url": "https://your-vercel-deployment.vercel.app/api/slack/interactions"
+      "request_url": "https://studio-shots.vercel.app/api/slack/interactions"
     },
     "org_deploy_enabled": false,
     "socket_mode_enabled": false,
