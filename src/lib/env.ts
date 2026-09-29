@@ -32,4 +32,16 @@ export const env = {
   get lumaAgentsApiKey() {
     return required("LUMA_AGENTS_API_KEY");
   },
+  get slackBotToken() {
+    return required("SLACK_BOT_TOKEN");
+  },
+  get slackSigningSecret() {
+    return required("SLACK_SIGNING_SECRET");
+  },
+  get slackTeamId() {
+    return required("SLACK_TEAM_ID");
+  },
+  get slackChannelId() {
+    return required("SLACK_CHANNEL_ID");
+  },
 };
