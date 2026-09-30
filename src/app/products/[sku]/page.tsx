@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { GradientButton } from "@/components/gradient-button";
 import { formatPriceCents, getProductPageData } from "@/lib/products";
 import {
   PRODUCT_EMPTY_APPROVED_PREFIX,
@@ -14,6 +15,20 @@ export const dynamic = "force-dynamic";
 
 type PageProps = {
   params: Promise<{ sku: string }>;
+  searchParams: Promise<{ campaign?: string | string[] }>;
+};
+
+const readCampaignImportId = (
+  value: string | string[] | undefined,
+): string | null => {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  if (Array.isArray(value)) {
+    const first = value.find((entry) => typeof entry === "string" && entry.trim());
+    return first?.trim() ?? null;
+  }
+  return null;
 };
 
 export async function generateMetadata(props: PageProps): Promise<Metadata> {
@@ -30,7 +45,10 @@ export async function generateMetadata(props: PageProps): Promise<Metadata> {
 
 export default async function ProductPage(props: PageProps) {
   const params = await props.params;
-  const data = await getProductPageData(params.sku);
+  const searchParams = await props.searchParams;
+  const data = await getProductPageData(params.sku, {
+    campaignImportId: readCampaignImportId(searchParams.campaign),
+  });
   if (!data) {
     notFound();
   }
@@ -68,6 +86,13 @@ export default async function ProductPage(props: PageProps) {
               <li>{data.colorOrFinish}</li>
               <li>{data.material}</li>
             </ul>
+            {data.campaignPagePath ? (
+              <div className={styles.actions}>
+                <GradientButton href={data.campaignPagePath}>
+                  Back to campaign
+                </GradientButton>
+              </div>
+            ) : null}
           </div>
         </section>
 

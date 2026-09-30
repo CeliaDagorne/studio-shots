@@ -1,8 +1,8 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
 import { CANDIDATE_STATUS, REVIEW_DECISION } from "@/lib/review";
-import { generationCandidates, products } from "@/lib/schema";
+import { generationCandidates, imports, products, shotRequests } from "@/lib/schema";
 
 export type ApprovedCandidateView = {
   id: string;
@@ -20,11 +20,23 @@ export type ProductPageData = {
   priceCents: number;
   photoUrl: string;
   approvedCandidates: ApprovedCandidateView[];
+  campaignPagePath: string | null;
 };
 
 export const buildProductPageUrl = (appUrl: string, sku: string): string => {
   const base = appUrl.replace(/\/+$/, "");
   return `${base}/products/${encodeURIComponent(sku)}`;
+};
+
+export const buildProductPagePath = (
+  sku: string,
+  options?: { campaignImportId?: string | null },
+): string => {
+  const path = `/products/${encodeURIComponent(sku)}`;
+  if (!options?.campaignImportId) {
+    return path;
+  }
+  return `${path}?campaign=${encodeURIComponent(options.campaignImportId)}`;
 };
 
 export const formatPriceCents = (priceCents: number): string => {
@@ -75,7 +87,39 @@ export const formatApprovalCompletionMessage = (params: {
   }
   return lines.join("\n");
 };
-export const getProductPageData = async (sku: string): Promise<ProductPageData | null> => {
+
+const resolveCampaignPagePath = async (
+  sku: string,
+  preferredImportId?: string | null,
+): Promise<string | null> => {
+  const db = getDb();
+
+  if (preferredImportId) {
+    const preferred = await db
+      .select({ id: imports.id })
+      .from(imports)
+      .where(eq(imports.id, preferredImportId))
+      .limit(1);
+    if (preferred[0]?.id) {
+      return `/campaigns/${encodeURIComponent(preferred[0].id)}`;
+    }
+  }
+
+  const latestForSku = await db
+    .select({ importId: shotRequests.importId })
+    .from(shotRequests)
+    .where(eq(shotRequests.productSku, sku))
+    .orderBy(desc(shotRequests.updatedAt))
+    .limit(1);
+
+  const importId = latestForSku[0]?.importId;
+  return importId ? `/campaigns/${encodeURIComponent(importId)}` : null;
+};
+
+export const getProductPageData = async (
+  sku: string,
+  options?: { campaignImportId?: string | null },
+): Promise<ProductPageData | null> => {
   const db = getDb();
   const productRows = await db.select().from(products).where(eq(products.sku, sku)).limit(1);
   const product = productRows[0];
@@ -104,5 +148,6 @@ export const getProductPageData = async (sku: string): Promise<ProductPageData |
     priceCents: product.priceCents,
     photoUrl: product.photoUrl,
     approvedCandidates: filterApprovedCandidates(candidateRows),
+    campaignPagePath: await resolveCampaignPagePath(sku, options?.campaignImportId),
   };
 };

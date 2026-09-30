@@ -3,7 +3,7 @@ import { desc, eq, inArray, notInArray } from "drizzle-orm";
 import { parseImportWarningsPayload } from "@/lib/import-meta";
 import { getDb } from "@/lib/db";
 import { env } from "@/lib/env";
-import { buildProductPageUrl } from "@/lib/products";
+import { buildProductPagePath, buildProductPageUrl } from "@/lib/products";
 import { WORKFLOW } from "@/lib/review";
 import { aggregateStudioStatus, type StudioStatusSummary } from "@/lib/status";
 import { generationCandidates, imports, products, shotRequests } from "@/lib/schema";
@@ -157,6 +157,7 @@ export const buildCampaignProductCards = (params: {
   }>;
   prioritiesBySku: Map<string, CatalogPriority>;
   approvedCountBySku: Map<string, number>;
+  importId?: string;
 }): CampaignProductCard[] => {
   const productBySku = new Map(params.products.map((product) => [product.sku, product]));
   const cards: CampaignProductCard[] = [];
@@ -175,7 +176,9 @@ export const buildCampaignProductCards = (params: {
       workflowStatus: request.workflowStatus,
       workflowStatusLabel: formatWorkflowStatusLabel(request.workflowStatus),
       approvedImageCount: params.approvedCountBySku.get(product.sku) ?? 0,
-      productPagePath: `/products/${encodeURIComponent(product.sku)}`,
+      productPagePath: buildProductPagePath(product.sku, {
+        campaignImportId: params.importId,
+      }),
     });
   }
 
@@ -294,6 +297,7 @@ export const assembleCampaignPageData = (params: {
       requests: orderedRequests,
       prioritiesBySku: params.prioritiesBySku,
       approvedCountBySku,
+      importId: params.importId,
     }),
     campaignPageUrl: buildCampaignPageUrl(params.appUrl, params.importId),
   };

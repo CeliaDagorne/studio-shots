@@ -90,6 +90,13 @@
   font-size: 0.95rem;
 }
 
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 0.35rem;
+}
+
 .section {
   margin-top: 2.75rem;
   animation: rise 900ms ease both;

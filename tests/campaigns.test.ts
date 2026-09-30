@@ -130,6 +130,34 @@ test("campaign product cards include status labels and product links", () => {
   assert.equal(formatWorkflowStatusLabel("imported_unconfirmed"), "Ready to generate");
 });
 
+test("campaign product cards deep-link back to the campaign overview", () => {
+  const cards = buildCampaignProductCards({
+    products: [
+      {
+        sku: "SS-001",
+        productName: "Lilac Ceramic Vase",
+        photoUrl: "/demo/ss-001-lilac-vase.png",
+      },
+    ],
+    requests: [
+      {
+        id: "req-1",
+        productSku: "SS-001",
+        shotIdea: "sunlit console",
+        workflowStatus: "awaiting_review",
+      },
+    ],
+    prioritiesBySku: new Map([["SS-001", "high"]]),
+    approvedCountBySku: new Map([["SS-001", 2]]),
+    importId: "import-abc",
+  });
+
+  assert.equal(
+    cards[0]?.productPagePath,
+    "/products/SS-001?campaign=import-abc",
+  );
+});
+
 test("assembleCampaignPageData builds totals and product links for a campaign", () => {
   const page = assembleCampaignPageData({
     importId: "import-abc",
@@ -187,7 +215,7 @@ test("assembleCampaignPageData builds totals and product links for a campaign", 
   assert.equal(page.totals.actionableProducts, 1);
   assert.equal(page.totals.completed, 1);
   assert.equal(page.totals.imagesApproved, 2);
-  assert.equal(page.products[0]?.productPagePath, "/products/SS-001");
+  assert.equal(page.products[0]?.productPagePath, "/products/SS-001?campaign=import-abc");
   assert.equal(page.products[1]?.priority, "normal");
   assert.equal(
     page.campaignPageUrl,
