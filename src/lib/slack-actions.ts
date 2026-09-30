@@ -23,7 +23,6 @@ import {
   evaluateProductSelection,
   selectionErrorMessage,
 } from "@/lib/product-selection";
-import { formatGenerationStartedLine } from "@/lib/request-planning";
 import { CANDIDATE_STATUS, PRIORITY_CANDIDATE_COUNT, REVIEW_DECISION, WORKFLOW } from "@/lib/review";
 import type { GenerationCandidateRow, ImportRow, ShotRequestRow } from "@/lib/schema";
 import { isAllowedSlackChannel, isAllowedSlackTeam } from "@/lib/slack";
@@ -31,6 +30,7 @@ import {
   buildSlackCancelledPreviewBlocks,
   buildSlackCandidateBlocks,
   buildSlackGenerationStartedBlocks,
+  buildSlackGenerationStartedFallbackText,
   buildSlackImportPreviewBlocks,
   buildSlackImportPreviewFallbackText,
   buildSlackProductPickerBlocks,
@@ -374,15 +374,11 @@ export const handleSlackBlockAction = async (
       return { httpBody: ephemeral(selectionErrorMessage("unavailable")) };
     }
 
-    const summary = importRecordToSummary(loaded.record);
-    const campaignPageUrl = campaignUrlFor(loaded.record.id);
-    const label = `priority product ${prioritySku}`;
-
     return {
       httpBody: {
         replace_original: true,
-        text: `${buildSlackImportPreviewFallbackText(summary, { campaignPageUrl })}\n\n${formatGenerationStartedLine(label)}`,
-        blocks: buildSlackGenerationStartedBlocks(summary, label, { campaignPageUrl }),
+        text: buildSlackGenerationStartedFallbackText(prioritySku),
+        blocks: buildSlackGenerationStartedBlocks(prioritySku),
       },
       background: async () => {
         await runPriority({
@@ -426,15 +422,11 @@ export const handleSlackBlockAction = async (
       return { httpBody: ephemeral(selectionErrorMessage("mismatch")) };
     }
 
-    const summary = importRecordToSummary(loaded.record);
-    const campaignPageUrl = campaignUrlFor(loaded.record.id);
-    const label = `${evaluation.option.sku} (${evaluation.option.priority})`;
-
     return {
       httpBody: {
         replace_original: true,
-        text: `${buildSlackImportPreviewFallbackText(summary, { campaignPageUrl })}\n\n${formatGenerationStartedLine(label)}`,
-        blocks: buildSlackGenerationStartedBlocks(summary, label, { campaignPageUrl }),
+        text: buildSlackGenerationStartedFallbackText(evaluation.option.sku),
+        blocks: buildSlackGenerationStartedBlocks(evaluation.option.sku),
       },
       background: async () => {
         await runSelected({

@@ -1,9 +1,8 @@
 import {
-  buildImportPreviewText,
+  CANDIDATES_PER_REQUEST,
   estimatedCostMicrosForOneProduct,
-  formatGenerationStartedLine,
+  formatOneProductCostLabel,
   formatPriorityGenerateButtonText,
-  formatPriorityRequestPreviewLine,
   formatProductPickerButtonText,
   formatUsdMicros,
   hasActionableGenerations,
@@ -20,6 +19,8 @@ export const SLACK_MAX_ACTIONS_BLOCKS_PER_MESSAGE = 5;
 export const SLACK_MAX_BUTTONS_PER_ACTIONS_BLOCK = 5;
 
 export const SLACK_PRODUCT_PICKER_PAGE_SIZE = 6;
+
+export const SLACK_GENERATION_MODE = "image_ref";
 
 export const countSlackActionBlocks = (blocks: SlackBlock[]): number =>
   blocks.filter((block) => block.type === "actions").length;
@@ -78,75 +79,110 @@ export const parseSlackGenValue = (
 };
 
 const button = (params: {
-  actionId: string;
+  actionId?: string;
   text: string;
-  value: string;
+  value?: string;
+  url?: string;
   style?: "primary" | "danger";
 }) => ({
   type: "button",
-  action_id: params.actionId,
+  ...(params.actionId ? { action_id: params.actionId } : {}),
   text: { type: "plain_text", text: params.text.slice(0, 75), emoji: true },
-  value: params.value,
+  ...(params.value ? { value: params.value } : {}),
+  ...(params.url ? { url: params.url } : {}),
   ...(params.style ? { style: params.style } : {}),
 });
 
+const field = (label: string, value: string) => ({
+  type: "mrkdwn",
+  text: `*${label}*\n${value}`,
+});
+
+const formatPriorityProductLabel = (summary: RequestPlanSummary): string => {
+  if (!summary.priorityRequestSku) {
+    return "None detected";
+  }
+  return summary.priorityRequestPriority
+    ? `${summary.priorityRequestSku} (${summary.priorityRequestPriority})`
+    : summary.priorityRequestSku;
+};
+
+const formatImportDetailsContextLine = (summary: RequestPlanSummary): string =>
+  [
+    `${summary.totalCatalogRows} rows`,
+    `${summary.newRequests} new`,
+    `${summary.changedRequests} changed`,
+    `${summary.unchangedExistingRequests} unchanged`,
+    `${summary.existingPendingRequests} pending`,
+  ].join(" · ");
+
 export const buildSlackImportActionElements = (
   summary: RequestPlanSummary,
+  options?: { campaignPageUrl?: string | null },
 ): SlackBlock[] => {
   if (!hasActionableGenerations(summary)) {
     return [];
   }
 
   const priorityLabel = formatPriorityGenerateButtonText(summary.priorityRequestSku);
+  const elements = [
+    button({
+      actionId: SLACK_ACTION_IDS.priority,
+      text: priorityLabel,
+      value: encodeSlackImportValue(summary.importId),
+      style: "primary",
+    }),
+    button({
+      actionId: SLACK_ACTION_IDS.choose,
+      text: "Choose product",
+      value: encodeSlackImportValue(summary.importId),
+    }),
+  ];
+
+  if (options?.campaignPageUrl) {
+    elements.push(
+      button({
+        text: "Campaign overview",
+        url: options.campaignPageUrl,
+      }),
+    );
+  }
+
+  elements.push(
+    button({
+      actionId: SLACK_ACTION_IDS.cancel,
+      text: "Cancel",
+      value: encodeSlackImportValue(summary.importId),
+      style: "danger",
+    }),
+  );
 
   return [
     {
       type: "actions",
       block_id: `ss_imp_actions:${summary.importId}`,
-      elements: [
-        button({
-          actionId: SLACK_ACTION_IDS.priority,
-          text: priorityLabel,
-          value: encodeSlackImportValue(summary.importId),
-          style: "primary",
-        }),
-        button({
-          actionId: SLACK_ACTION_IDS.choose,
-          text: "Choose a product",
-          value: encodeSlackImportValue(summary.importId),
-        }),
-        button({
-          actionId: SLACK_ACTION_IDS.cancel,
-          text: "Cancel",
-          value: encodeSlackImportValue(summary.importId),
-          style: "danger",
-        }),
-      ],
+      elements,
     },
   ];
 };
 
 /**
- * Block Kit preview for a catalog import. Content mirrors buildImportPreviewText
- * using the shared RequestPlanSummary — no separate planning logic.
+ * Block Kit preview for a catalog import. Uses the shared RequestPlanSummary —
+ * no separate planning logic.
  */
 export const buildSlackImportPreviewBlocks = (
   summary: RequestPlanSummary,
   options?: { campaignPageUrl?: string | null; includeActions?: boolean },
 ): SlackBlock[] => {
   const includeActions = options?.includeActions !== false;
-  const warningText =
-    summary.warnings.length === 0
+  const readyCount = summary.requestsReadyToGenerate;
+  const otherProducts = summary.actionableProducts.filter(
+    (product) => product.sku !== summary.priorityRequestSku,
+  );
+  const otherProductsText =
+    otherProducts.length === 0
       ? "_None_"
-      : summary.warnings
-          .slice(0, 6)
-          .map((warning) => `• *${warning.sku}*: ${warning.message}`)
-          .join("\n");
-
-  const actionableText =
-    summary.actionableProducts.length === 0
-      ? "_None_"
-      : summary.actionableProducts
+      : otherProducts
           .slice(0, 12)
           .map((product) => `• *${product.sku}* (${product.priority})`)
           .join("\n");
@@ -154,77 +190,57 @@ export const buildSlackImportPreviewBlocks = (
   const blocks: SlackBlock[] = [
     {
       type: "header",
-      text: { type: "plain_text", text: "Catalog import preview", emoji: true },
-    },
-    {
-      type: "section",
-      fields: [
-        { type: "mrkdwn", text: `*Total catalog rows*\n${summary.totalCatalogRows}` },
-        { type: "mrkdwn", text: `*Rows with Shot Idea*\n${summary.rowsWithShotIdea}` },
-        { type: "mrkdwn", text: `*New requests*\n${summary.newRequests}` },
-        { type: "mrkdwn", text: `*Changed requests*\n${summary.changedRequests}` },
-        {
-          type: "mrkdwn",
-          text: `*Unchanged existing*\n${summary.unchangedExistingRequests}`,
-        },
-        {
-          type: "mrkdwn",
-          text: `*Existing pending*\n${summary.existingPendingRequests}`,
-        },
-        {
-          type: "mrkdwn",
-          text: `*Ready to generate*\n${summary.requestsReadyToGenerate}`,
-        },
-        {
-          type: "mrkdwn",
-          text: `*Planned generations*\n${summary.plannedGenerations}`,
-        },
-      ],
-    },
-    {
-      type: "section",
-      fields: [
-        {
-          type: "mrkdwn",
-          text: `*Estimated generation cost*\n${formatUsdMicros(summary.additionalEstimatedCostMicrosUsd)} (all ready)\n${formatUsdMicros(estimatedCostMicrosForOneProduct())} per product`,
-        },
-        { type: "mrkdwn", text: `*Aspect ratio*\n${MVP_ASPECT_RATIO}` },
-        {
-          type: "mrkdwn",
-          text: `*Priority product*\n${
-            summary.priorityRequestSku
-              ? `${summary.priorityRequestSku}${
-                  summary.priorityRequestPriority
-                    ? ` (${summary.priorityRequestPriority})`
-                    : ""
-                }`
-              : "None detected"
-          }`,
-        },
-      ],
+      text: { type: "plain_text", text: "Catalog ready", emoji: true },
     },
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*Actionable products*\n${actionableText}`,
+        text: `*${readyCount} products ready to generate*`,
+      },
+    },
+    {
+      type: "section",
+      fields: [
+        field("Planned images", String(summary.plannedGenerations)),
+        field(
+          "Total estimated cost",
+          formatUsdMicros(summary.additionalEstimatedCostMicrosUsd),
+        ),
+        field(
+          "Cost per product",
+          `${formatUsdMicros(estimatedCostMicrosForOneProduct())} (3 candidates)`,
+        ),
+        field("Aspect ratio", MVP_ASPECT_RATIO),
+      ],
+    },
+    { type: "divider" },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*Up next*\n${formatPriorityProductLabel(summary)}`,
       },
     },
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*Catalog-level warnings*\n${warningText}`,
+        text: `*Other products*\n${otherProductsText}`,
       },
     },
   ];
 
-  if (options?.campaignPageUrl) {
+  if (summary.warnings.length > 0) {
+    blocks.push({ type: "divider" });
     blocks.push({
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*Campaign overview*\n<${options.campaignPageUrl}|Open campaign page>`,
+        text: `*Warnings*\n${summary.warnings
+          .slice(0, 6)
+          .map((warning) => `• *${warning.sku}*: ${warning.message}`)
+          .join("\n")}`,
       },
     });
   }
@@ -234,20 +250,19 @@ export const buildSlackImportPreviewBlocks = (
       type: "context",
       elements: [{ type: "mrkdwn", text: IMPORT_UP_TO_DATE_MESSAGE }],
     });
-  } else {
-    blocks.push({
-      type: "context",
-      elements: [
-        {
-          type: "mrkdwn",
-          text: `${formatPriorityRequestPreviewLine(summary)}. Choose priority generation or pick any actionable SKU.`,
-        },
-      ],
-    });
-    if (includeActions) {
-      blocks.push(...buildSlackImportActionElements(summary));
-    }
+  } else if (includeActions) {
+    blocks.push(...buildSlackImportActionElements(summary, options));
   }
+
+  blocks.push({
+    type: "context",
+    elements: [
+      {
+        type: "mrkdwn",
+        text: formatImportDetailsContextLine(summary),
+      },
+    ],
+  });
 
   return blocks;
 };
@@ -255,7 +270,56 @@ export const buildSlackImportPreviewBlocks = (
 export const buildSlackImportPreviewFallbackText = (
   summary: RequestPlanSummary,
   options?: { campaignPageUrl?: string | null },
-): string => buildImportPreviewText(summary, options);
+): string => {
+  const readyCount = summary.requestsReadyToGenerate;
+  const otherProducts = summary.actionableProducts.filter(
+    (product) => product.sku !== summary.priorityRequestSku,
+  );
+  const lines = [
+    "Catalog ready",
+    "",
+    `${readyCount} products ready to generate`,
+    "",
+    `Planned images: ${summary.plannedGenerations}`,
+    `Total estimated cost: ${formatUsdMicros(summary.additionalEstimatedCostMicrosUsd)}`,
+    `Cost per product: ${formatUsdMicros(estimatedCostMicrosForOneProduct())} (3 candidates)`,
+    `Aspect ratio: ${MVP_ASPECT_RATIO}`,
+    "",
+    `Up next: ${formatPriorityProductLabel(summary)}`,
+  ];
+
+  if (otherProducts.length > 0) {
+    lines.push(
+      "",
+      "Other products:",
+      ...otherProducts
+        .slice(0, 12)
+        .map((product) => `- ${product.sku} (${product.priority})`),
+    );
+  }
+
+  if (summary.warnings.length > 0) {
+    lines.push(
+      "",
+      "Warnings:",
+      ...summary.warnings
+        .slice(0, 6)
+        .map((warning) => `- ${warning.sku}: ${warning.message}`),
+    );
+  }
+
+  lines.push("", formatImportDetailsContextLine(summary));
+
+  if (options?.campaignPageUrl) {
+    lines.push("", `Campaign overview: ${options.campaignPageUrl}`);
+  }
+
+  if (!hasActionableGenerations(summary)) {
+    lines.push("", IMPORT_UP_TO_DATE_MESSAGE);
+  }
+
+  return lines.join("\n");
+};
 
 export const buildSlackProductPickerLoadingBlocks = (
   importId: string,
@@ -402,25 +466,51 @@ export const buildSlackCancelledPreviewBlocks = (
   },
 ];
 
-export const buildSlackGenerationStartedBlocks = (
-  summary: RequestPlanSummary,
-  label: string,
-  options?: { campaignPageUrl?: string | null },
-): SlackBlock[] => [
-  ...buildSlackImportPreviewBlocks(summary, {
-    ...options,
-    includeActions: false,
-  }),
-  {
-    type: "context",
-    elements: [
-      {
-        type: "mrkdwn",
-        text: `*${formatGenerationStartedLine(label)}*`,
+export const buildSlackGenerationStartedFallbackText = (sku: string): string => {
+  const cost = formatOneProductCostLabel();
+  return [
+    `✨ Generating ${sku}`,
+    "",
+    `Candidates: ${CANDIDATES_PER_REQUEST}`,
+    `Estimated cost: ${cost}`,
+    `Aspect ratio: ${MVP_ASPECT_RATIO}`,
+    `Generation mode: ${SLACK_GENERATION_MODE}`,
+    "",
+    "Results will appear in this channel as each candidate is ready.",
+  ].join("\n");
+};
+
+export const buildSlackGenerationStartedBlocks = (sku: string): SlackBlock[] => {
+  const cost = formatOneProductCostLabel();
+  return [
+    {
+      type: "header",
+      text: {
+        type: "plain_text",
+        text: `✨ Generating ${sku}`.slice(0, 150),
+        emoji: true,
       },
-    ],
-  },
-];
+    },
+    {
+      type: "section",
+      fields: [
+        field("Candidates", String(CANDIDATES_PER_REQUEST)),
+        field("Estimated cost", cost),
+        field("Aspect ratio", MVP_ASPECT_RATIO),
+        field("Generation mode", SLACK_GENERATION_MODE),
+      ],
+    },
+    {
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: "Results will appear in this channel as each candidate is ready.",
+        },
+      ],
+    },
+  ];
+};
 
 export const encodeSlackCandidateValue = (candidateId: string): string => candidateId;
 

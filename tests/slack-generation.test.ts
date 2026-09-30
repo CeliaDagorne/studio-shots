@@ -144,19 +144,61 @@ const baseDeps = () => {
   return { deps, responsePosts };
 };
 
-test("import preview Block Kit includes Generate priority, Choose a product, and Cancel", async () => {
+test("import preview Block Kit includes Generate, Choose product, and Campaign overview", async () => {
   const { buildSlackImportPreviewBlocks, SLACK_ACTION_IDS } = await import("@/lib/slack-blocks");
   const blocks = buildSlackImportPreviewBlocks(sampleSummary(), {
     campaignPageUrl: "https://studio-shots.example/campaigns/import-aaa",
   });
   const serialized = JSON.stringify(blocks);
-  assert.match(serialized, /Generate priority: SS-001 · ~\$0\.13/);
-  assert.match(serialized, /Choose a product/);
-  assert.match(serialized, /Cancel/);
-  assert.match(serialized, /per product/);
+  assert.match(serialized, /Catalog ready/);
+  assert.match(serialized, /3 products ready to generate/);
+  assert.match(serialized, /Planned images/);
+  assert.match(serialized, /Total estimated cost/);
+  assert.match(serialized, /Cost per product/);
   assert.match(serialized, /Aspect ratio/);
   assert.match(serialized, /4:5/);
+  assert.match(serialized, /Up next/);
+  assert.match(serialized, /Other products/);
+  assert.match(serialized, /Generate priority: SS-001 · ~\$0\.13/);
+  assert.match(serialized, /Choose product/);
+  assert.match(serialized, /Campaign overview/);
+  assert.match(serialized, /Cancel/);
+  assert.match(serialized, /3 rows · 3 new · 0 changed · 0 unchanged · 0 pending/);
+  assert.doesNotMatch(serialized, /Catalog-level warnings/);
   assert.match(serialized, new RegExp(SLACK_ACTION_IDS.priority));
+  assert.ok(serialized.includes('"type":"divider"'));
+});
+
+test("import preview omits warnings section when empty and shows them when present", async () => {
+  const { buildSlackImportPreviewBlocks } = await import("@/lib/slack-blocks");
+  const withoutWarnings = JSON.stringify(buildSlackImportPreviewBlocks(sampleSummary()));
+  assert.doesNotMatch(withoutWarnings, /\*Warnings\*/);
+
+  const withWarnings = JSON.stringify(
+    buildSlackImportPreviewBlocks({
+      ...sampleSummary(),
+      warnings: [{ sku: "SS-001", message: "Source photo may be underexposed." }],
+    }),
+  );
+  assert.match(withWarnings, /\*Warnings\*/);
+  assert.match(withWarnings, /Source photo may be underexposed/);
+});
+
+test("generation started Block Kit uses header fields and context", async () => {
+  const {
+    buildSlackGenerationStartedBlocks,
+    buildSlackGenerationStartedFallbackText,
+  } = await import("@/lib/slack-blocks");
+  const blocks = buildSlackGenerationStartedBlocks("SS-001");
+  const serialized = JSON.stringify(blocks);
+  assert.match(serialized, /✨ Generating SS-001/);
+  assert.match(serialized, /Candidates/);
+  assert.match(serialized, /Estimated cost/);
+  assert.match(serialized, /Aspect ratio/);
+  assert.match(serialized, /Generation mode/);
+  assert.match(serialized, /image_ref/);
+  assert.match(serialized, /Results will appear/);
+  assert.match(buildSlackGenerationStartedFallbackText("SS-001"), /✨ Generating SS-001/);
 });
 
 test("product picker stays within Slack action block limits", async () => {
@@ -237,7 +279,9 @@ test("priority generation action starts the shared generation path", async () =>
     },
   );
 
-  assert.match(result.httpBody.text, /Confirmed: generating priority product SS-001 in the background \(~\$0\.13 for 3 candidates\)/);
+  assert.match(result.httpBody.text, /✨ Generating SS-001/);
+  assert.match(result.httpBody.text, /Results will appear/);
+  assert.match(JSON.stringify(result.httpBody.blocks), /✨ Generating SS-001/);
   assert.equal(result.httpBody.replace_original, true);
   await result.background!();
   assert.equal(priorityCalls, 1);
@@ -263,7 +307,8 @@ test("manual SKU selection validates request id and sku server-side", async () =
       },
     },
   );
-  assert.match(ok.httpBody.text, /Confirmed: generating SS-002 \(normal\) in the background \(~\$0\.13 for 3 candidates\)/);
+  assert.match(ok.httpBody.text, /✨ Generating SS-002/);
+  assert.match(JSON.stringify(ok.httpBody.blocks), /✨ Generating SS-002/);
   await ok.background!();
   assert.equal(selectedCalls, 1);
 
