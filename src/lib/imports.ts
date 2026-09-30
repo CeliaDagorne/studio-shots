@@ -158,6 +158,7 @@ export const buildImportPlan = async (
   let priorityLevel: CatalogPriority | null = null;
   let bestPriorityRank = 0;
   const actionableProducts: ActionableProductOption[] = [];
+  const catalogProducts: ActionableProductOption[] = [];
 
   const considerPriority = (row: CatalogRow) => {
     const rank = catalogPriorityRank(row.priority);
@@ -168,12 +169,21 @@ export const buildImportPlan = async (
     }
   };
 
+  const rememberCatalog = (requestId: string, row: CatalogRow) => {
+    catalogProducts.push({
+      requestId,
+      sku: row.sku,
+      priority: row.priority,
+    });
+  };
+
   const rememberActionable = (requestId: string, row: CatalogRow) => {
     actionableProducts.push({
       requestId,
       sku: row.sku,
       priority: row.priority,
     });
+    rememberCatalog(requestId, row);
     considerPriority(row);
   };
 
@@ -220,6 +230,10 @@ export const buildImportPlan = async (
       if (matchingRequest && isActionableWorkflowStatus(matchingRequest.workflowStatus)) {
         existingPendingRequests += 1;
         rememberActionable(matchingRequest.id, row);
+      } else if (matchingRequest) {
+        // Keep completed / in-progress SKUs on the campaign overview even when
+        // they are no longer selectable for generation.
+        rememberCatalog(matchingRequest.id, row);
       }
       continue;
     }
@@ -280,7 +294,7 @@ export const buildImportPlan = async (
       requestsReadyToGenerate: summary.requestsReadyToGenerate,
       plannedGenerations: summary.plannedGenerations,
       additionalEstimatedCostMicrosUsd: summary.additionalEstimatedCostMicrosUsd,
-      warnings: serializeImportWarningsPayload(warnings, actionableProducts),
+      warnings: serializeImportWarningsPayload(warnings, actionableProducts, catalogProducts),
       priorityRequestSku: summary.priorityRequestSku,
       platform: conversation.platform,
       conversationId: conversation.conversationId,

@@ -10,6 +10,7 @@ import {
   formatCampaignImportedAt,
   formatWorkflowStatusLabel,
   mapStudioStatusToCampaignTotals,
+  orderCampaignRequests,
 } from "@/lib/campaigns";
 import { filterApprovedCandidates } from "@/lib/products";
 import { aggregateStudioStatus, formatStudioStatusMessage } from "@/lib/status";
@@ -60,6 +61,44 @@ test("mapStudioStatusToCampaignTotals preserves aggregateStudioStatus counts", (
   assert.equal(totals.candidatesGenerated, 3);
   assert.equal(totals.imagesApproved, 2);
   assert.equal(totals.estimatedSpendLabel, "$0.13");
+});
+
+test("orderCampaignRequests keeps completed catalog SKUs ahead of owned-only rows", () => {
+  const ordered = orderCampaignRequests({
+    catalogProducts: [
+      { requestId: "req-vase", sku: "SS-001", priority: "high" },
+      { requestId: "req-candle", sku: "SS-002", priority: "normal" },
+    ],
+    actionable: [{ requestId: "req-candle", sku: "SS-002", priority: "normal" }],
+    ownedRequests: [
+      {
+        id: "req-candle",
+        productSku: "SS-002",
+        shotIdea: "evening table",
+        workflowStatus: "imported_unconfirmed",
+      },
+    ],
+    linkedRequests: [
+      {
+        id: "req-vase",
+        productSku: "SS-001",
+        shotIdea: "travertine pedestal",
+        workflowStatus: "approved",
+      },
+      {
+        id: "req-candle",
+        productSku: "SS-002",
+        shotIdea: "evening table",
+        workflowStatus: "imported_unconfirmed",
+      },
+    ],
+  });
+
+  assert.deepEqual(
+    ordered.map((request) => request.productSku),
+    ["SS-001", "SS-002"],
+  );
+  assert.equal(ordered[0]?.workflowStatus, "approved");
 });
 
 test("campaign product cards include status labels and product links", () => {

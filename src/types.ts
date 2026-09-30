@@ -54,10 +54,13 @@ export type ActionableProductOption = {
 /**
  * JSON stored in `imports.warnings` (jsonb). Keeps catalog warnings plus the
  * ordered actionable picker list so we can show priority without a migration.
+ * `catalogProducts` is the full ordered showcase list (including completed /
+ * unchanged SKUs that are no longer actionable).
  */
 export type ImportWarningsPayload = {
   warnings: CatalogWarning[];
   actionable: ActionableProductOption[];
+  catalogProducts?: ActionableProductOption[];
 };
 
 export type RequestPlanSummary = {

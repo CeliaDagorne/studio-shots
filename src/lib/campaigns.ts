@@ -1,4 +1,4 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { desc, eq, inArray, notInArray } from "drizzle-orm";
 
 import { parseImportWarningsPayload } from "@/lib/import-meta";
 import { getDb } from "@/lib/db";
@@ -7,7 +7,7 @@ import { buildProductPageUrl } from "@/lib/products";
 import { WORKFLOW } from "@/lib/review";
 import { aggregateStudioStatus, type StudioStatusSummary } from "@/lib/status";
 import { generationCandidates, imports, products, shotRequests } from "@/lib/schema";
-import type { CatalogPriority } from "@/types";
+import type { ActionableProductOption, CatalogPriority } from "@/types";
 
 export const PUBLIC_GITHUB_REPO_URL = "https://github.com/CeliaDagorne/studio-shots";
 export const PUBLIC_README_URL = `${PUBLIC_GITHUB_REPO_URL}/blob/main/README.md`;
@@ -193,6 +193,56 @@ const uniqueBySkuKeepFirst = <T extends { productSku: string }>(rows: T[]): T[] 
   return result;
 };
 
+type CampaignRequestRow = {
+  id: string;
+  productSku: string;
+  shotIdea: string;
+  workflowStatus: string;
+};
+
+/**
+ * Prefer the ordered catalog showcase list (includes completed SKUs), then any
+ * remaining actionable / import-owned requests.
+ */
+export const orderCampaignRequests = (params: {
+  catalogProducts: ActionableProductOption[];
+  actionable: ActionableProductOption[];
+  ownedRequests: CampaignRequestRow[];
+  linkedRequests: CampaignRequestRow[];
+}): CampaignRequestRow[] => {
+  const byId = new Map<string, CampaignRequestRow>();
+  for (const request of params.linkedRequests) {
+    byId.set(request.id, request);
+  }
+  for (const request of params.ownedRequests) {
+    if (!byId.has(request.id)) {
+      byId.set(request.id, request);
+    }
+  }
+
+  const preferredIds =
+    params.catalogProducts.length > 0
+      ? params.catalogProducts.map((option) => option.requestId)
+      : params.actionable.map((option) => option.requestId);
+
+  const preferredSeen = new Set<string>();
+  const ordered: CampaignRequestRow[] = [];
+  for (const id of preferredIds) {
+    const request = byId.get(id);
+    if (!request || preferredSeen.has(request.productSku)) continue;
+    preferredSeen.add(request.productSku);
+    ordered.push(request);
+  }
+
+  for (const request of params.ownedRequests) {
+    if (preferredSeen.has(request.productSku)) continue;
+    preferredSeen.add(request.productSku);
+    ordered.push(request);
+  }
+
+  return ordered;
+};
+
 export const assembleCampaignPageData = (params: {
   importId: string;
   createdAt: Date;
@@ -260,10 +310,24 @@ export const getCampaignPageData = async (
   }
 
   const payload = parseImportWarningsPayload(importRecord.warnings);
-  const actionableIds = payload.actionable.map((option) => option.requestId);
-  const prioritiesBySku = new Map(
-    payload.actionable.map((option) => [option.sku, option.priority] as const),
-  );
+  const catalogProducts = payload.catalogProducts ?? [];
+  const actionable = payload.actionable;
+  const linkedIds = [
+    ...new Set([
+      ...catalogProducts.map((option) => option.requestId),
+      ...actionable.map((option) => option.requestId),
+    ]),
+  ];
+
+  const prioritiesBySku = new Map<string, CatalogPriority>();
+  for (const option of catalogProducts) {
+    prioritiesBySku.set(option.sku, option.priority);
+  }
+  for (const option of actionable) {
+    if (!prioritiesBySku.has(option.sku)) {
+      prioritiesBySku.set(option.sku, option.priority);
+    }
+  }
 
   const ownedRequests = await db
     .select({
@@ -275,8 +339,8 @@ export const getCampaignPageData = async (
     .from(shotRequests)
     .where(eq(shotRequests.importId, importId));
 
-  const actionableRequests =
-    actionableIds.length > 0
+  const linkedRequests =
+    linkedIds.length > 0
       ? await db
           .select({
             id: shotRequests.id,
@@ -285,27 +349,52 @@ export const getCampaignPageData = async (
             workflowStatus: shotRequests.workflowStatus,
           })
           .from(shotRequests)
-          .where(inArray(shotRequests.id, actionableIds))
+          .where(inArray(shotRequests.id, linkedIds))
       : [];
 
-  // Prefer CSV / actionable order, then any other rows owned by this import.
-  const byId = new Map<string, (typeof ownedRequests)[number]>();
-  for (const request of actionableRequests) {
-    byId.set(request.id, request);
-  }
-  for (const request of ownedRequests) {
-    if (!byId.has(request.id)) {
-      byId.set(request.id, request);
+  let requests = orderCampaignRequests({
+    catalogProducts,
+    actionable,
+    ownedRequests,
+    linkedRequests,
+  });
+
+  // Legacy imports only stored actionable SKUs. Pull in completed unchanged
+  // requests so earlier work (e.g. the vase) still appears on the overview.
+  if (catalogProducts.length === 0) {
+    const visibleSkus = new Set(requests.map((request) => request.productSku));
+    const missingCount = Math.max(
+      0,
+      importRecord.rowsWithShotIdea - visibleSkus.size,
+    );
+    if (missingCount > 0) {
+      const extrasQuery = db
+        .select({
+          id: shotRequests.id,
+          productSku: shotRequests.productSku,
+          shotIdea: shotRequests.shotIdea,
+          workflowStatus: shotRequests.workflowStatus,
+          updatedAt: shotRequests.updatedAt,
+        })
+        .from(shotRequests);
+
+      const extras =
+        visibleSkus.size > 0
+          ? await extrasQuery
+              .where(notInArray(shotRequests.productSku, [...visibleSkus]))
+              .orderBy(desc(shotRequests.updatedAt))
+          : await extrasQuery.orderBy(desc(shotRequests.updatedAt));
+
+      const showcaseExtras = uniqueBySkuKeepFirst(extras)
+        .filter((request) => request.workflowStatus !== WORKFLOW.importedUnconfirmed)
+        .sort((left, right) => left.productSku.localeCompare(right.productSku))
+        .slice(0, missingCount);
+
+      if (showcaseExtras.length > 0) {
+        requests = [...showcaseExtras, ...requests];
+      }
     }
   }
-
-  const orderedIds = [
-    ...actionableIds.filter((id) => byId.has(id)),
-    ...ownedRequests.map((request) => request.id).filter((id) => !actionableIds.includes(id)),
-  ];
-  const requests = orderedIds
-    .map((id) => byId.get(id))
-    .filter((row): row is NonNullable<typeof row> => Boolean(row));
 
   const skus = [...new Set(requests.map((request) => request.productSku))];
   const productRows =

@@ -26,6 +26,7 @@ export const parseImportWarningsPayload = (raw: unknown): ImportWarningsPayload 
     return {
       warnings: raw.filter(isCatalogWarning),
       actionable: [],
+      catalogProducts: [],
     };
   }
 
@@ -37,16 +38,21 @@ export const parseImportWarningsPayload = (raw: unknown): ImportWarningsPayload 
     const actionable = Array.isArray(record.actionable)
       ? record.actionable.filter(isActionableProductOption)
       : [];
-    return { warnings, actionable };
+    const catalogProducts = Array.isArray(record.catalogProducts)
+      ? record.catalogProducts.filter(isActionableProductOption)
+      : [];
+    return { warnings, actionable, catalogProducts };
   }
 
-  return { warnings: [], actionable: [] };
+  return { warnings: [], actionable: [], catalogProducts: [] };
 };
 
 export const serializeImportWarningsPayload = (
   warnings: CatalogWarning[],
   actionable: ActionableProductOption[],
+  catalogProducts: ActionableProductOption[] = actionable,
 ): ImportWarningsPayload => ({
   warnings,
   actionable,
+  catalogProducts,
 });

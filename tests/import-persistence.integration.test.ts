@@ -312,7 +312,7 @@ test("unchanged completed requests are not actionable", { skip: !integrationEnab
     upsertCatalogAndPlanImport,
     deleteImportArtifacts,
   } = await import("@/lib/imports");
-  const { shotRequests } = await import("@/lib/schema");
+  const { shotRequests, imports } = await import("@/lib/schema");
   const { eq } = await import("drizzle-orm");
 
   const testSku = uniqueSku("TEST-DONE");
@@ -357,6 +357,13 @@ test("unchanged completed requests are not actionable", { skip: !integrationEnab
   assert.equal(second.requestsReadyToGenerate, 0);
   assert.equal(second.plannedGenerations, 0);
   assert.equal(second.priorityRequestSku, null);
+
+  const secondRecord = await db.select().from(imports).where(eq(imports.id, second.importId)).limit(1);
+  const { parseImportWarningsPayload } = await import("@/lib/import-meta");
+  const payload = parseImportWarningsPayload(secondRecord[0]?.warnings);
+  assert.equal(payload.actionable.length, 0);
+  assert.equal(payload.catalogProducts?.length, 1);
+  assert.equal(payload.catalogProducts?.[0]?.sku, testSku);
 });
 
 test("identical imports never create duplicate shot requests", { skip: !integrationEnabled }, async (t) => {
