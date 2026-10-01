@@ -136,13 +136,32 @@ type SlackApiResult = {
   ok: boolean;
   error?: string;
   ts?: string;
+  response_metadata?: {
+    messages?: string[];
+  };
 };
 
-export const postSlackMessage = async (params: {
+export class SlackPostMessageError extends Error {
+  readonly slackError: string;
+  readonly validationMessages: string[];
+
+  constructor(slackError: string, validationMessages: string[] = []) {
+    const detail =
+      validationMessages.length > 0
+        ? `${slackError}: ${validationMessages.join(" | ")}`
+        : slackError;
+    super(`Slack chat.postMessage failed: ${detail}`);
+    this.name = "SlackPostMessageError";
+    this.slackError = slackError;
+    this.validationMessages = validationMessages;
+  }
+}
+
+const postSlackChatMessage = async (body: {
   channel: string;
   text: string;
   blocks?: SlackBlock[];
-}): Promise<{ ts?: string }> => {
+}): Promise<SlackApiResult> => {
   const response = await fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
     headers: {
@@ -150,9 +169,9 @@ export const postSlackMessage = async (params: {
       "content-type": "application/json; charset=utf-8",
     },
     body: JSON.stringify({
-      channel: params.channel,
-      text: params.text,
-      ...(params.blocks ? { blocks: params.blocks } : {}),
+      channel: body.channel,
+      text: body.text,
+      ...(body.blocks ? { blocks: body.blocks } : {}),
     }),
     cache: "no-store",
   });
@@ -161,12 +180,60 @@ export const postSlackMessage = async (params: {
     throw new Error(`Slack chat.postMessage HTTP ${response.status}`);
   }
 
-  const json = (await response.json()) as SlackApiResult;
-  if (!json.ok) {
-    throw new Error(`Slack chat.postMessage failed: ${json.error ?? "unknown_error"}`);
+  return (await response.json()) as SlackApiResult;
+};
+
+/**
+ * Post a Slack message. On `invalid_blocks`, logs Slack validation details
+ * (never tokens/credentials) and retries once as plain text without blocks.
+ */
+export const postSlackMessage = async (params: {
+  channel: string;
+  text: string;
+  blocks?: SlackBlock[];
+}): Promise<{ ts?: string; usedFallback?: boolean }> => {
+  const json = await postSlackChatMessage({
+    channel: params.channel,
+    text: params.text,
+    blocks: params.blocks,
+  });
+
+  if (json.ok) {
+    return { ts: json.ts };
   }
 
-  return { ts: json.ts };
+  const validationMessages = json.response_metadata?.messages ?? [];
+  // Log error code + Block Kit validation messages only — never auth material.
+  console.error(
+    "[slack/chat.postMessage]",
+    json.error ?? "unknown_error",
+    validationMessages.length > 0 ? validationMessages : undefined,
+  );
+
+  if (json.error === "invalid_blocks" && params.blocks && params.blocks.length > 0) {
+    const fallback = await postSlackChatMessage({
+      channel: params.channel,
+      text: params.text,
+    });
+    if (fallback.ok) {
+      console.error(
+        "[slack/chat.postMessage] recovered with plain-text fallback after invalid_blocks",
+      );
+      return { ts: fallback.ts, usedFallback: true };
+    }
+    const fallbackMessages = fallback.response_metadata?.messages ?? [];
+    console.error(
+      "[slack/chat.postMessage]",
+      fallback.error ?? "unknown_error",
+      fallbackMessages.length > 0 ? fallbackMessages : undefined,
+    );
+    throw new SlackPostMessageError(
+      fallback.error ?? json.error ?? "unknown_error",
+      fallbackMessages.length > 0 ? fallbackMessages : validationMessages,
+    );
+  }
+
+  throw new SlackPostMessageError(json.error ?? "unknown_error", validationMessages);
 };
 
 export type SlackEventDeps = {

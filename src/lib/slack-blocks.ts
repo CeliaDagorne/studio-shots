@@ -26,13 +26,43 @@ export const SLACK_PRODUCT_PICKER_PAGE_SIZE = 6;
 
 const testModeContextBlock = (): SlackBlock => ({
   type: "context",
-  elements: [{ type: "mrkdwn", text: SLACK_FAKE_GENERATION_CONTEXT }],
+  elements: [
+    {
+      type: "plain_text",
+      text: SLACK_FAKE_GENERATION_CONTEXT.slice(0, 3000),
+      emoji: true,
+    },
+  ],
 });
 
 const testCandidateContextBlock = (): SlackBlock => ({
   type: "context",
-  elements: [{ type: "mrkdwn", text: SLACK_FAKE_CANDIDATE_CONTEXT }],
+  elements: [
+    {
+      type: "plain_text",
+      text: SLACK_FAKE_CANDIDATE_CONTEXT.slice(0, 3000),
+      emoji: true,
+    },
+  ],
 });
+
+/** Escape dynamic text for Slack mrkdwn (Shot Ideas, SKUs, etc.). */
+export const escapeSlackMrkdwn = (value: string): string =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/[*_~`]/g, (ch) => `\\${ch}`);
+
+const truncateSlackText = (value: string, max: number): string => {
+  if (value.length <= max) {
+    return value;
+  }
+  if (max <= 1) {
+    return value.slice(0, max);
+  }
+  return `${value.slice(0, max - 1)}…`;
+};
 
 const formatSlackPriorityGenerateButtonText = (
   sku: string | null | undefined,
@@ -589,7 +619,7 @@ export const buildSlackGenerationStartedBlocks = (
       type: "header",
       text: {
         type: "plain_text",
-        text: `✨ Generating ${sku}`.slice(0, 150),
+        text: truncateSlackText(`✨ Generating ${sku}`, 150),
         emoji: true,
       },
     },
@@ -604,7 +634,10 @@ export const buildSlackGenerationStartedBlocks = (
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*Creative direction*\n_${idea}_`,
+        text: truncateSlackText(
+          `*Creative direction*\n_${escapeSlackMrkdwn(idea)}_`,
+          3000,
+        ),
       },
     });
   }
@@ -614,7 +647,7 @@ export const buildSlackGenerationStartedBlocks = (
       type: "section",
       text: {
         type: "mrkdwn",
-        text: generationStartedSummaryMrkdwn(Boolean(testMode)),
+        text: truncateSlackText(generationStartedSummaryMrkdwn(Boolean(testMode)), 3000),
       },
     },
     {
@@ -622,7 +655,7 @@ export const buildSlackGenerationStartedBlocks = (
       elements: [
         {
           type: "mrkdwn",
-          text: generationStartedSupportLine(Boolean(testMode)),
+          text: truncateSlackText(generationStartedSupportLine(Boolean(testMode)), 3000),
         },
       ],
     },

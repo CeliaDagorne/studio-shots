@@ -73,7 +73,7 @@ export const resolveImageGenerationProviderName = (
 };
 
 export const SLACK_FAKE_GENERATION_CONTEXT =
-  "🧪 Test mode · Free — no Luma calls or generation charges.";
+  "🧪 Test mode · Free - no Luma calls or generation charges.";
 
 /** Compact notice on candidate / continuation messages in fake mode. */
 export const SLACK_FAKE_CANDIDATE_CONTEXT = "🧪 Test candidate · No generation cost";

@@ -306,26 +306,41 @@ export const runShotRequestGeneration = async (params: {
 
     for (const candidate of ready) {
       if (!candidate.blobUrl) continue;
-      const delivered = await deliverCandidateImage({
-        conversation: params.conversation,
-        blobUrl: candidate.blobUrl,
-        caption: candidateCaption({
+      try {
+        const delivered = await deliverCandidateImage({
+          conversation: params.conversation,
+          blobUrl: candidate.blobUrl,
+          caption: candidateCaption({
+            sku: candidate.productSku,
+            index: candidate.candidateIndex,
+            total: PRIORITY_CANDIDATE_COUNT,
+          }),
+          candidateId: candidate.id,
           sku: candidate.productSku,
-          index: candidate.candidateIndex,
-          total: PRIORITY_CANDIDATE_COUNT,
-        }),
-        candidateId: candidate.id,
-        sku: candidate.productSku,
-        candidateIndex: candidate.candidateIndex,
-      });
-      if (delivered.externalMessageId) {
-        await db
-          .update(generationCandidates)
-          .set({
-            externalMessageId: delivered.externalMessageId,
-            updatedAt: now(),
-          })
-          .where(eq(generationCandidates.id, candidate.id));
+          candidateIndex: candidate.candidateIndex,
+        });
+        if (delivered.externalMessageId) {
+          await db
+            .update(generationCandidates)
+            .set({
+              externalMessageId: delivered.externalMessageId,
+              updatedAt: now(),
+            })
+            .where(eq(generationCandidates.id, candidate.id));
+        } else if (delivered.deliveryError) {
+          console.error(
+            "[generation/slack-delivery]",
+            candidate.id,
+            delivered.deliveryError,
+          );
+        }
+      } catch (error) {
+        // Candidate rows stay ready in DB even when Slack presentation fails.
+        console.error(
+          "[generation/slack-delivery]",
+          candidate.id,
+          error instanceof Error ? error.message : "delivery failed",
+        );
       }
     }
 
@@ -342,29 +357,63 @@ export const runShotRequestGeneration = async (params: {
 
     await markRequestStatus(shotRequestId, WORKFLOW.awaitingReview);
 
-    if (failed.length > 0) {
-      await notifyConversation(
-        params.conversation,
-        `${claimedRequest.productSku}: ${ready.length} candidate(s) ready for review, ${failed.length} failed. Review the photos above; the request will resolve after every available candidate is approved or rejected.`,
-      );
-    } else if (params.conversation.platform === CHAT_PLATFORM.slack) {
-      const readyMessage = buildSlackCandidatesReadyBlocks({
-        sku: claimedRequest.productSku,
-        candidateCount: ready.length,
-        approvalThreshold: MIN_APPROVALS_TO_COMPLETE,
-        testMode: isFakeImageGenerationProvider(),
-      });      await notifyConversation(params.conversation, readyMessage.text, {
-        blocks: readyMessage.blocks,
-      });
-    } else {
-      await notifyConversation(
-        params.conversation,
-        `${claimedRequest.productSku}: all ${ready.length} candidates are ready. Approve or reject each photo. Done requires at least 2 approvals.`,
+    try {
+      if (failed.length > 0) {
+        await notifyConversation(
+          params.conversation,
+          `${claimedRequest.productSku}: ${ready.length} candidate(s) ready for review, ${failed.length} failed. Review the photos above; the request will resolve after every available candidate is approved or rejected.`,
+        );
+      } else if (params.conversation.platform === CHAT_PLATFORM.slack) {
+        const readyMessage = buildSlackCandidatesReadyBlocks({
+          sku: claimedRequest.productSku,
+          candidateCount: ready.length,
+          approvalThreshold: MIN_APPROVALS_TO_COMPLETE,
+          testMode: isFakeImageGenerationProvider(),
+        });
+        await notifyConversation(params.conversation, readyMessage.text, {
+          blocks: readyMessage.blocks,
+        });
+      } else {
+        await notifyConversation(
+          params.conversation,
+          `${claimedRequest.productSku}: all ${ready.length} candidates are ready. Approve or reject each photo. Done requires at least 2 approvals.`,
+        );
+      }
+    } catch (error) {
+      console.error(
+        "[generation/slack-notify]",
+        error instanceof Error ? error.message : "ready notification failed",
       );
     }
     return { claimed: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown generation failure";
+    // Slack presentation failures after candidates are ready should not wipe generation.
+    if (/Slack chat\.postMessage failed/i.test(message)) {
+      console.error("[generation/slack-presentation]", message);
+      const db = getDb();
+      const readyCount = await db
+        .select({ id: generationCandidates.id })
+        .from(generationCandidates)
+        .where(
+          and(
+            eq(generationCandidates.shotRequestId, shotRequestId),
+            eq(generationCandidates.status, CANDIDATE_STATUS.ready),
+          ),
+        );
+      if (readyCount.length > 0) {
+        await markRequestStatus(shotRequestId, WORKFLOW.awaitingReview);
+        try {
+          await notifyConversation(
+            params.conversation,
+            `${label}: ${readyCount.length} candidate(s) are ready for review. (Slack rich message delivery failed; generation itself succeeded.)`,
+          );
+        } catch {
+          // ignore secondary notify failure
+        }
+        return { claimed: true };
+      }
+    }
     await ensureRequestLeavesGenerating(shotRequestId, WORKFLOW.failed);
     await notifyConversation(
       params.conversation,

@@ -450,7 +450,7 @@ test("priority generation action starts the shared generation path", async () =>
   assert.match(result.httpBody.text, /Creative direction/);
   assert.match(result.httpBody.text, /on a travertine pedestal, warm editorial interior/);
   assert.match(result.httpBody.text, /Results will appear/);
-  assert.match(result.httpBody.text, /🧪 Test mode · Free — no Luma calls or generation charges\./);
+  assert.match(result.httpBody.text, /🧪 Test mode · Free - no Luma calls or generation charges\./);
   assert.match(result.httpBody.text, /3 demo candidates · 4:5 portrait · \$0\.00 charged/);
   assert.match(JSON.stringify(result.httpBody.blocks), /✨ Generating SS-001/);
   assert.match(JSON.stringify(result.httpBody.blocks), /Creative direction/);

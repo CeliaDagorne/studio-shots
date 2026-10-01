@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test tests/imports.test.ts tests/assets.test.ts tests/priority.test.ts tests/import-preview-ux.test.ts tests/product-picker.test.ts tests/campaigns.test.ts tests/review.test.ts tests/generation-pipeline.unit.test.ts tests/image-generation-provider.test.ts tests/products-status.test.ts tests/chat-identity.test.ts tests/slack-events.test.ts tests/slack-import.test.ts tests/slack-generation.test.ts tests/slack-review.test.ts tests/website-copy.test.ts tests/import-meta.test.ts tests/import-persistence.integration.test.ts tests/generation-claim.integration.test.ts",
+    "test": "node --import tsx --test tests/imports.test.ts tests/assets.test.ts tests/priority.test.ts tests/import-preview-ux.test.ts tests/product-picker.test.ts tests/campaigns.test.ts tests/review.test.ts tests/generation-pipeline.unit.test.ts tests/image-generation-provider.test.ts tests/products-status.test.ts tests/chat-identity.test.ts tests/slack-events.test.ts tests/slack-import.test.ts tests/slack-generation.test.ts tests/slack-generation-started-blocks.test.ts tests/slack-review.test.ts tests/website-copy.test.ts tests/import-meta.test.ts tests/import-persistence.integration.test.ts tests/generation-claim.integration.test.ts",
     "db:generate": "node --import tsx scripts/db-generate.ts",
     "db:migrate": "node --import tsx scripts/db-migrate.ts",
     "db:verify": "node --import tsx scripts/db-verify.ts",
