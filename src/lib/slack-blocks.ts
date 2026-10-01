@@ -9,7 +9,7 @@ import {
   IMPORT_UP_TO_DATE_MESSAGE,
   MVP_ASPECT_RATIO,
 } from "@/lib/request-planning";
-import { candidateCaption } from "@/lib/review";
+import { candidateCaption, MIN_APPROVALS_TO_COMPLETE } from "@/lib/review";
 import type { ActionableProductOption, RequestPlanSummary } from "@/types";
 
 export type SlackBlock = Record<string, unknown>;
@@ -19,8 +19,6 @@ export const SLACK_MAX_ACTIONS_BLOCKS_PER_MESSAGE = 5;
 export const SLACK_MAX_BUTTONS_PER_ACTIONS_BLOCK = 5;
 
 export const SLACK_PRODUCT_PICKER_PAGE_SIZE = 6;
-
-export const SLACK_GENERATION_MODE = "image_ref";
 
 export const countSlackActionBlocks = (blocks: SlackBlock[]): number =>
   blocks.filter((block) => block.type === "actions").length;
@@ -98,13 +96,12 @@ const field = (label: string, value: string) => ({
   text: `*${label}*\n${value}`,
 });
 
-const formatPriorityProductLabel = (summary: RequestPlanSummary): string => {
+const formatUpNextSection = (summary: RequestPlanSummary): string => {
   if (!summary.priorityRequestSku) {
-    return "None detected";
+    return "🎯 *Up next*\n_None detected_";
   }
-  return summary.priorityRequestPriority
-    ? `${summary.priorityRequestSku} (${summary.priorityRequestPriority})`
-    : summary.priorityRequestSku;
+  const priority = summary.priorityRequestPriority ?? "normal";
+  return `🎯 *Up next*\n*${summary.priorityRequestSku}* · ${priority} priority`;
 };
 
 const formatImportDetailsContextLine = (summary: RequestPlanSummary): string =>
@@ -176,21 +173,19 @@ export const buildSlackImportPreviewBlocks = (
 ): SlackBlock[] => {
   const includeActions = options?.includeActions !== false;
   const readyCount = summary.requestsReadyToGenerate;
+  const perProductCost = formatUsdMicros(estimatedCostMicrosForOneProduct());
   const otherProducts = summary.actionableProducts.filter(
     (product) => product.sku !== summary.priorityRequestSku,
   );
-  const otherProductsText =
-    otherProducts.length === 0
-      ? "_None_"
-      : otherProducts
-          .slice(0, 12)
-          .map((product) => `• *${product.sku}* (${product.priority})`)
-          .join("\n");
+  const otherProductsText = otherProducts
+    .slice(0, 12)
+    .map((product) => `• *${product.sku}* (${product.priority})`)
+    .join("\n");
 
   const blocks: SlackBlock[] = [
     {
       type: "header",
-      text: { type: "plain_text", text: "Catalog ready", emoji: true },
+      text: { type: "plain_text", text: "📸 Catalog ready", emoji: true },
     },
     {
       type: "section",
@@ -202,16 +197,16 @@ export const buildSlackImportPreviewBlocks = (
     {
       type: "section",
       fields: [
-        field("Planned images", String(summary.plannedGenerations)),
+        field("Planned output", `${summary.plannedGenerations} images`),
         field(
-          "Total estimated cost",
-          formatUsdMicros(summary.additionalEstimatedCostMicrosUsd),
+          "Estimated cost",
+          `${formatUsdMicros(summary.additionalEstimatedCostMicrosUsd)} total`,
         ),
         field(
-          "Cost per product",
-          `${formatUsdMicros(estimatedCostMicrosForOneProduct())} (3 candidates)`,
+          "Per product",
+          `${perProductCost} · ${CANDIDATES_PER_REQUEST} candidates`,
         ),
-        field("Aspect ratio", MVP_ASPECT_RATIO),
+        field("Format", MVP_ASPECT_RATIO),
       ],
     },
     { type: "divider" },
@@ -219,17 +214,20 @@ export const buildSlackImportPreviewBlocks = (
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*Up next*\n${formatPriorityProductLabel(summary)}`,
-      },
-    },
-    {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `*Other products*\n${otherProductsText}`,
+        text: formatUpNextSection(summary),
       },
     },
   ];
+
+  if (otherProducts.length > 0) {
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*Also available*\n${otherProductsText}`,
+      },
+    });
+  }
 
   if (summary.warnings.length > 0) {
     blocks.push({ type: "divider" });
@@ -272,26 +270,35 @@ export const buildSlackImportPreviewFallbackText = (
   options?: { campaignPageUrl?: string | null },
 ): string => {
   const readyCount = summary.requestsReadyToGenerate;
+  const perProductCost = formatUsdMicros(estimatedCostMicrosForOneProduct());
   const otherProducts = summary.actionableProducts.filter(
     (product) => product.sku !== summary.priorityRequestSku,
   );
   const lines = [
-    "Catalog ready",
+    "📸 Catalog ready",
     "",
     `${readyCount} products ready to generate`,
     "",
-    `Planned images: ${summary.plannedGenerations}`,
-    `Total estimated cost: ${formatUsdMicros(summary.additionalEstimatedCostMicrosUsd)}`,
-    `Cost per product: ${formatUsdMicros(estimatedCostMicrosForOneProduct())} (3 candidates)`,
-    `Aspect ratio: ${MVP_ASPECT_RATIO}`,
+    `Planned output: ${summary.plannedGenerations} images`,
+    `Estimated cost: ${formatUsdMicros(summary.additionalEstimatedCostMicrosUsd)} total`,
+    `Per product: ${perProductCost} · ${CANDIDATES_PER_REQUEST} candidates`,
+    `Format: ${MVP_ASPECT_RATIO}`,
     "",
-    `Up next: ${formatPriorityProductLabel(summary)}`,
   ];
+
+  if (summary.priorityRequestSku) {
+    const priority = summary.priorityRequestPriority ?? "normal";
+    lines.push(
+      `Up next: ${summary.priorityRequestSku} · ${priority} priority`,
+    );
+  } else {
+    lines.push("Up next: None detected");
+  }
 
   if (otherProducts.length > 0) {
     lines.push(
       "",
-      "Other products:",
+      "Also available:",
       ...otherProducts
         .slice(0, 12)
         .map((product) => `- ${product.sku} (${product.priority})`),
@@ -471,12 +478,9 @@ export const buildSlackGenerationStartedFallbackText = (sku: string): string => 
   return [
     `✨ Generating ${sku}`,
     "",
-    `Candidates: ${CANDIDATES_PER_REQUEST}`,
-    `Estimated cost: ${cost}`,
-    `Aspect ratio: ${MVP_ASPECT_RATIO}`,
-    `Generation mode: ${SLACK_GENERATION_MODE}`,
+    `${CANDIDATES_PER_REQUEST} candidates · ${MVP_ASPECT_RATIO} · ${cost}`,
     "",
-    "Results will appear in this channel as each candidate is ready.",
+    "Using the product image as reference. Results will appear here when ready.",
   ].join("\n");
 };
 
@@ -493,23 +497,142 @@ export const buildSlackGenerationStartedBlocks = (sku: string): SlackBlock[] => 
     },
     {
       type: "section",
-      fields: [
-        field("Candidates", String(CANDIDATES_PER_REQUEST)),
-        field("Estimated cost", cost),
-        field("Aspect ratio", MVP_ASPECT_RATIO),
-        field("Generation mode", SLACK_GENERATION_MODE),
-      ],
+      text: {
+        type: "mrkdwn",
+        text: `*${CANDIDATES_PER_REQUEST} candidates* · *${MVP_ASPECT_RATIO}* · *${cost}*`,
+      },
     },
     {
       type: "context",
       elements: [
         {
           type: "mrkdwn",
-          text: "Results will appear in this channel as each candidate is ready.",
+          text: "Using the product image as reference. Results will appear here when ready.",
         },
       ],
     },
   ];
+};
+
+export const buildSlackCandidatesReadyFallbackText = (params: {
+  sku: string;
+  candidateCount: number;
+  approvalThreshold?: number;
+}): string => {
+  const threshold = params.approvalThreshold ?? MIN_APPROVALS_TO_COMPLETE;
+  return [
+    `🖼️ ${params.sku} ready for review`,
+    "",
+    `${params.candidateCount} candidates are ready. Approve or reject each image.`,
+    "",
+    `Approve at least ${threshold} candidates to complete this product.`,
+  ].join("\n");
+};
+
+export const buildSlackCandidatesReadyBlocks = (params: {
+  sku: string;
+  candidateCount: number;
+  approvalThreshold?: number;
+}): { text: string; blocks: SlackBlock[] } => {
+  const threshold = params.approvalThreshold ?? MIN_APPROVALS_TO_COMPLETE;
+  const text = buildSlackCandidatesReadyFallbackText(params);
+  return {
+    text,
+    blocks: [
+      {
+        type: "header",
+        text: {
+          type: "plain_text",
+          text: `🖼️ ${params.sku} ready for review`.slice(0, 150),
+          emoji: true,
+        },
+      },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `*${params.candidateCount} candidates are ready.* Approve or reject each image.`,
+        },
+      },
+      {
+        type: "context",
+        elements: [
+          {
+            type: "mrkdwn",
+            text: `Approve at least ${threshold} candidates to complete this product.`,
+          },
+        ],
+      },
+    ],
+  };
+};
+
+export const buildSlackProductApprovedFallbackText = (params: {
+  sku: string;
+  approvalCount: number;
+  productPageUrl: string;
+  campaignPageUrl?: string | null;
+}): string => {
+  const lines = [
+    `✅ ${params.sku} approved`,
+    "",
+    `${params.approvalCount} candidates approved. This product is complete.`,
+    "",
+    `View product: ${params.productPageUrl}`,
+  ];
+  if (params.campaignPageUrl) {
+    lines.push(`View campaign: ${params.campaignPageUrl}`);
+  }
+  return lines.join("\n");
+};
+
+export const buildSlackProductApprovedBlocks = (params: {
+  sku: string;
+  approvalCount: number;
+  productPageUrl: string;
+  campaignPageUrl?: string | null;
+}): { text: string; blocks: SlackBlock[] } => {
+  const text = buildSlackProductApprovedFallbackText(params);
+  const linkButtons = [
+    button({
+      text: "View product",
+      url: params.productPageUrl,
+    }),
+  ];
+  if (params.campaignPageUrl) {
+    linkButtons.push(
+      button({
+        text: "View campaign",
+        url: params.campaignPageUrl,
+      }),
+    );
+  }
+
+  return {
+    text,
+    blocks: [
+      {
+        type: "header",
+        text: {
+          type: "plain_text",
+          text: `✅ ${params.sku} approved`.slice(0, 150),
+          emoji: true,
+        },
+      },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `*${params.approvalCount} candidates approved.* This product is complete.`,
+        },
+      },
+      {
+        type: "actions",
+        block_id: `ss_approved_links:${params.sku}`,
+        elements: linkButtons,
+      },
+    ],
+  };
 };
 
 export const encodeSlackCandidateValue = (candidateId: string): string => candidateId;

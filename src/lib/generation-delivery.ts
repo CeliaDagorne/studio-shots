@@ -6,7 +6,7 @@ import {
   type ChatConversation,
 } from "@/lib/chat-identity";
 import { PRIORITY_CANDIDATE_COUNT } from "@/lib/review";
-import { buildSlackCandidateBlocks } from "@/lib/slack-blocks";
+import { buildSlackCandidateBlocks, type SlackBlock } from "@/lib/slack-blocks";
 import { postSlackMessage } from "@/lib/slack";
 import {
   reviewCandidateKeyboard,
@@ -18,6 +18,7 @@ import {
 export const notifyConversation = async (
   conversation: ChatConversation,
   text: string,
+  options?: { blocks?: SlackBlock[] },
 ): Promise<void> => {
   if (conversation.platform === CHAT_PLATFORM.telegram) {
     await sendMessage(requireTelegramConversation(conversation), text);
@@ -27,6 +28,7 @@ export const notifyConversation = async (
     await postSlackMessage({
       channel: requireSlackConversation(conversation),
       text,
+      ...(options?.blocks ? { blocks: options.blocks } : {}),
     });
     return;
   }

@@ -556,6 +556,8 @@ test("request completion notification runs only when newly resolved", async () =
   assert.ok(result.background);
   await result.background!();
   assert.equal(notifications.length, 1);
-  assert.match(notifications[0]!, /marked approved/);
-  assert.match(notifications[0]!, /Product page:/);
+  assert.match(notifications[0]!, /✅ SS-001 approved/);
+  assert.match(notifications[0]!, /2 candidates approved/);
+  assert.match(notifications[0]!, /View product:/);
+  assert.match(notifications[0]!, /View campaign:/);
 });

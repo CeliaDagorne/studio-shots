@@ -150,15 +150,16 @@ test("import preview Block Kit includes Generate, Choose product, and Campaign o
     campaignPageUrl: "https://studio-shots.example/campaigns/import-aaa",
   });
   const serialized = JSON.stringify(blocks);
-  assert.match(serialized, /Catalog ready/);
+  assert.match(serialized, /📸 Catalog ready/);
   assert.match(serialized, /3 products ready to generate/);
-  assert.match(serialized, /Planned images/);
-  assert.match(serialized, /Total estimated cost/);
-  assert.match(serialized, /Cost per product/);
-  assert.match(serialized, /Aspect ratio/);
+  assert.match(serialized, /Planned output/);
+  assert.match(serialized, /Estimated cost/);
+  assert.match(serialized, /Per product/);
+  assert.match(serialized, /Format/);
   assert.match(serialized, /4:5/);
-  assert.match(serialized, /Up next/);
-  assert.match(serialized, /Other products/);
+  assert.match(serialized, /🎯 \*Up next\*/);
+  assert.match(serialized, /\*SS-001\* · high priority/);
+  assert.match(serialized, /Also available/);
   assert.match(serialized, /Generate priority: SS-001 · ~\$0\.13/);
   assert.match(serialized, /Choose product/);
   assert.match(serialized, /Campaign overview/);
@@ -184,7 +185,7 @@ test("import preview omits warnings section when empty and shows them when prese
   assert.match(withWarnings, /Source photo may be underexposed/);
 });
 
-test("generation started Block Kit uses header fields and context", async () => {
+test("generation started Block Kit uses summary line and context", async () => {
   const {
     buildSlackGenerationStartedBlocks,
     buildSlackGenerationStartedFallbackText,
@@ -192,13 +193,42 @@ test("generation started Block Kit uses header fields and context", async () => 
   const blocks = buildSlackGenerationStartedBlocks("SS-001");
   const serialized = JSON.stringify(blocks);
   assert.match(serialized, /✨ Generating SS-001/);
-  assert.match(serialized, /Candidates/);
-  assert.match(serialized, /Estimated cost/);
-  assert.match(serialized, /Aspect ratio/);
-  assert.match(serialized, /Generation mode/);
-  assert.match(serialized, /image_ref/);
-  assert.match(serialized, /Results will appear/);
+  assert.match(serialized, /\*3 candidates\* · \*4:5\* · \*~\$0\.13\*/);
+  assert.match(serialized, /Using the product image as reference/);
+  assert.match(serialized, /Results will appear here when ready/);
+  assert.doesNotMatch(serialized, /Generation mode/);
   assert.match(buildSlackGenerationStartedFallbackText("SS-001"), /✨ Generating SS-001/);
+});
+
+test("candidates ready Block Kit summarizes review guidance", async () => {
+  const { buildSlackCandidatesReadyBlocks } = await import("@/lib/slack-blocks");
+  const built = buildSlackCandidatesReadyBlocks({
+    sku: "SS-001",
+    candidateCount: 3,
+  });
+  const serialized = JSON.stringify(built.blocks);
+  assert.match(serialized, /🖼️ SS-001 ready for review/);
+  assert.match(serialized, /\*3 candidates are ready\./);
+  assert.match(serialized, /Approve at least 2 candidates/);
+  assert.match(built.text, /🖼️ SS-001 ready for review/);
+});
+
+test("product approved Block Kit uses View product and View campaign links", async () => {
+  const { buildSlackProductApprovedBlocks } = await import("@/lib/slack-blocks");
+  const built = buildSlackProductApprovedBlocks({
+    sku: "SS-001",
+    approvalCount: 2,
+    productPageUrl: "https://studio-shots.example/products/SS-001",
+    campaignPageUrl: "https://studio-shots.example/campaigns/import-1",
+  });
+  const serialized = JSON.stringify(built.blocks);
+  assert.match(serialized, /✅ SS-001 approved/);
+  assert.match(serialized, /\*2 candidates approved\./);
+  assert.match(serialized, /View product/);
+  assert.match(serialized, /View campaign/);
+  assert.match(serialized, /https:\/\/studio-shots\.example\/products\/SS-001/);
+  assert.match(serialized, /https:\/\/studio-shots\.example\/campaigns\/import-1/);
+  assert.match(built.text, /View product:/);
 });
 
 test("product picker stays within Slack action block limits", async () => {

@@ -7,6 +7,7 @@ import { runCandidateImagePipeline } from "@/lib/candidate-pipeline";
 import { buildCampaignPageUrl } from "@/lib/campaigns";
 import {
   type ChatConversation,
+  CHAT_PLATFORM,
   parseTelegramMessageId,
   requireTelegramConversation,
 } from "@/lib/chat-identity";
@@ -25,6 +26,7 @@ import {
 } from "@/lib/products";
 import {
   CANDIDATE_STATUS,
+  MIN_APPROVALS_TO_COMPLETE,
   PRIORITY_CANDIDATE_COUNT,
   REVIEW_DECISION,
   WORKFLOW,
@@ -33,6 +35,7 @@ import {
 } from "@/lib/review";
 import { MVP_ASPECT_RATIO } from "@/lib/request-planning";
 import { generationCandidates, imports, products, shotRequests } from "@/lib/schema";
+import { buildSlackCandidatesReadyBlocks } from "@/lib/slack-blocks";
 import {
   editMessageCaption,
   removeInlineKeyboard,
@@ -347,6 +350,15 @@ export const runShotRequestGeneration = async (params: {
         params.conversation,
         `${claimedRequest.productSku}: ${ready.length} candidate(s) ready for review, ${failed.length} failed. Review the photos above; the request will resolve after every available candidate is approved or rejected.`,
       );
+    } else if (params.conversation.platform === CHAT_PLATFORM.slack) {
+      const readyMessage = buildSlackCandidatesReadyBlocks({
+        sku: claimedRequest.productSku,
+        candidateCount: ready.length,
+        approvalThreshold: MIN_APPROVALS_TO_COMPLETE,
+      });
+      await notifyConversation(params.conversation, readyMessage.text, {
+        blocks: readyMessage.blocks,
+      });
     } else {
       await notifyConversation(
         params.conversation,

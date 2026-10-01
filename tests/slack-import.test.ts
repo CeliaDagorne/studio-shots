@@ -152,8 +152,8 @@ test("successful Slack catalog import posts Block Kit preview via shared plannin
   assert.ok(Array.isArray(posts[0]?.blocks));
   assert.ok((posts[0]?.blocks?.length ?? 0) > 0);
   const serialized = JSON.stringify(posts[0]?.blocks);
-  assert.match(serialized, /Catalog ready/);
-  assert.match(serialized, /Total estimated cost/);
+  assert.match(serialized, /📸 Catalog ready/);
+  assert.match(serialized, /Estimated cost/);
   assert.match(serialized, /Up next/);
   assert.match(serialized, /SS-001/);
   assert.match(serialized, /Campaign overview/);
@@ -387,9 +387,9 @@ test("Slack import Block Kit mirrors shared preview totals", async () => {
     campaignPageUrl: "https://studio-shots.example/campaigns/import-slack-1",
   });
   const serialized = JSON.stringify(blocks);
-  assert.match(serialized, /Catalog ready/);
+  assert.match(serialized, /📸 Catalog ready/);
   assert.match(serialized, /2 products ready to generate/);
-  assert.match(serialized, /Total estimated cost/);
+  assert.match(serialized, /Estimated cost/);
   assert.match(serialized, /\$0\.26/);
   assert.match(serialized, /Up next/);
   assert.match(serialized, /SS-001/);

@@ -17,7 +17,6 @@ import {
 } from "@/lib/imports";
 import {
   buildProductPageUrl,
-  formatApprovalCompletionMessage,
 } from "@/lib/products";
 import {
   evaluateProductSelection,
@@ -33,6 +32,7 @@ import {
   buildSlackGenerationStartedFallbackText,
   buildSlackImportPreviewBlocks,
   buildSlackImportPreviewFallbackText,
+  buildSlackProductApprovedBlocks,
   buildSlackProductPickerBlocks,
   buildSlackProductPickerLoadingBlocks,
   finalizeSlackCandidateMessageBlocks,
@@ -574,20 +574,20 @@ export const handleSlackBlockAction = async (
             persisted.approvedCount !== null &&
             persisted.candidate
           ) {
-            await notify(
-              conversation,
-              formatApprovalCompletionMessage({
-                sku: persisted.candidate.productSku,
-                approvedCount: persisted.approvedCount,
-                productPageUrl: buildProductPageUrl(
-                  appUrl,
-                  persisted.candidate.productSku,
-                ),
-                campaignPageUrl: persisted.importId
-                  ? buildCampaignPageUrl(appUrl, persisted.importId)
-                  : null,
-              }),
+            const productPageUrl = buildProductPageUrl(
+              appUrl,
+              persisted.candidate.productSku,
             );
+            const campaignPageUrl = persisted.importId
+              ? buildCampaignPageUrl(appUrl, persisted.importId)
+              : null;
+            const approved = buildSlackProductApprovedBlocks({
+              sku: persisted.candidate.productSku,
+              approvalCount: persisted.approvedCount,
+              productPageUrl,
+              campaignPageUrl,
+            });
+            await notify(conversation, approved.text, { blocks: approved.blocks });
           } else if (
             persisted.requestStatus === WORKFLOW.needsRegeneration &&
             persisted.candidate
