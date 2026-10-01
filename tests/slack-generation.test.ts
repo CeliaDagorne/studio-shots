@@ -206,9 +206,10 @@ test("generation started Block Kit uses creative direction, summary line, and co
     withIdeaSerialized,
     /\*3 lifestyle candidates\* · \*4:5 portrait\* · \*~\$0\.13\*/,
   );
-  assert.match(withIdeaSerialized, /Using the catalog product photo as reference/);
+  assert.match(withIdeaSerialized, /Using the catalog product photo as the source/);
   assert.match(withIdeaSerialized, /Results will appear here when ready/);
   assert.doesNotMatch(withIdeaSerialized, /image_ref/);
+  assert.doesNotMatch(withIdeaSerialized, /as reference/);
 
   const fallback = buildSlackGenerationStartedFallbackText({
     sku: "SS-001",
@@ -217,7 +218,9 @@ test("generation started Block Kit uses creative direction, summary line, and co
   assert.match(fallback, /Creative direction/);
   assert.match(fallback, /on a travertine pedestal, warm editorial interior/);
   assert.match(fallback, /3 lifestyle candidates · 4:5 portrait · ~\$0\.13/);
+  assert.match(fallback, /Using the catalog product photo as the source/);
   assert.doesNotMatch(fallback, /image_ref/);
+  assert.doesNotMatch(fallback, /as reference/);
 
   const withoutIdea = JSON.stringify(buildSlackGenerationStartedBlocks({ sku: "SS-002" }));
   assert.doesNotMatch(withoutIdea, /Creative direction/);
@@ -352,6 +355,7 @@ test("priority generation action starts the shared generation path", async () =>
     }),
     {
       ...baseDeps().deps,
+      isFakeGeneration: () => true,
       runPriorityGeneration: async (params) => {
         priorityCalls += 1;
         assert.equal(params.importId, "import-aaa");
@@ -365,8 +369,10 @@ test("priority generation action starts the shared generation path", async () =>
   assert.match(result.httpBody.text, /Creative direction/);
   assert.match(result.httpBody.text, /on a travertine pedestal, warm editorial interior/);
   assert.match(result.httpBody.text, /Results will appear/);
+  assert.match(result.httpBody.text, /🧪 Test mode · No Luma generation will be charged/);
   assert.match(JSON.stringify(result.httpBody.blocks), /✨ Generating SS-001/);
   assert.match(JSON.stringify(result.httpBody.blocks), /Creative direction/);
+  assert.match(JSON.stringify(result.httpBody.blocks), /Test mode/);
   assert.equal(result.httpBody.replace_original, true);
   await result.background!();
   assert.equal(priorityCalls, 1);

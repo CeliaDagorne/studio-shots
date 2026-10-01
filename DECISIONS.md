@@ -58,13 +58,13 @@ Product and engineering choices behind Studio Shots.
 
 **Impact:** `status.ts` aggregates products, pipeline stages, candidates, spend, and approved product page links. `campaigns.ts` reuses that aggregation for the campaign page. Import and completion messages include the campaign URL when available.
 
-## Generation method: `image_ref` at 4:5
+## Generation method: `image_edit` from the catalog product photo
 
-**Decision:** Primary path is Luma `image_ref` with aspect ratio `4:5` (not `image_edit`).
+**Decision:** Primary path is Luma `type: "image_edit"` with the catalog product photo as `source` (not `image_ref`).
 
-**Why:** Portrait framing fits product-page and social placements better for catalog lifestyle shots. Side-by-side validation favored more natural, editorial scenes from `image_ref`, with controllable framing. `image_edit` preserved the source more literally and remains a possible fidelity fallback later.
+**Why:** Product fidelity is the hard requirement — the full product must stay visible and recognizable. `image_edit` edits the packshot in place so shape, proportions, color, and material are preserved while the Shot Idea builds a lifestyle environment around it. `image_ref` generated new scenes inspired by the photo and too often cropped or redesigned the product. Luma ignores `aspect_ratio` on `image_edit` (output dimensions follow the source), so we omit it rather than silently falling back to `image_ref` just to request `4:5`.
 
-**Impact:** Defaults in `luma.ts` / `request-planning.ts`; prompts stress product shape, color, and material fidelity.
+**Impact:** Defaults in `luma.ts`; prompts keep the catalog Shot Idea as creative direction and append fixed framing constraints (full product visible, centered at ~60–75%, safe margins, no crop/obscure). Cost estimate constant and candidate count are unchanged.
 
 ## What we are not building (yet)
 

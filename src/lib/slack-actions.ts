@@ -9,6 +9,7 @@ import {
   runSelectedRequestGeneration,
 } from "@/lib/generation";
 import { notifyConversation } from "@/lib/generation-delivery";
+import { isFakeImageGenerationProvider } from "@/lib/image-generation";
 import {
   getImportById,
   importRecordToSummary,
@@ -142,6 +143,7 @@ export type SlackActionDeps = {
   appUrl?: string;
   isAllowedTeam?: (teamId: string) => boolean;
   isAllowedChannel?: (channelId: string) => boolean;
+  isFakeGeneration?: () => boolean;
 };
 
 export const SLACK_INTERACTION_MESSAGES = {
@@ -205,6 +207,7 @@ export const handleSlackBlockAction = async (
   const appUrl = deps.appUrl ?? env.appUrl;
   const allowTeam = deps.isAllowedTeam ?? isAllowedSlackTeam;
   const allowChannel = deps.isAllowedChannel ?? isAllowedSlackChannel;
+  const isFakeGeneration = deps.isFakeGeneration ?? isFakeImageGenerationProvider;
 
   const teamId = payload.team?.id;
   const channelId = payload.channel?.id;
@@ -379,6 +382,7 @@ export const handleSlackBlockAction = async (
     const generationMessage = {
       sku: prioritySku,
       shotIdea: priorityRequest?.shotIdea ?? null,
+      testMode: isFakeGeneration(),
     };
 
     return {
@@ -432,6 +436,7 @@ export const handleSlackBlockAction = async (
     const generationMessage = {
       sku: evaluation.option.sku,
       shotIdea: request?.shotIdea ?? null,
+      testMode: isFakeGeneration(),
     };
 
     return {

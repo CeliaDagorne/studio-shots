@@ -10,6 +10,7 @@ import {
   MVP_ASPECT_RATIO,
 } from "@/lib/request-planning";
 import { candidateCaption, MIN_APPROVALS_TO_COMPLETE } from "@/lib/review";
+import { SLACK_FAKE_GENERATION_CONTEXT } from "@/lib/image-generation";
 import type { ActionableProductOption, RequestPlanSummary } from "@/types";
 
 export type SlackBlock = Record<string, unknown>;
@@ -476,6 +477,7 @@ export const buildSlackCancelledPreviewBlocks = (
 export type GenerationStartedMessageParams = {
   sku: string;
   shotIdea?: string | null;
+  testMode?: boolean;
 };
 
 const normalizeShotIdea = (shotIdea: string | null | undefined): string | null => {
@@ -486,11 +488,23 @@ const normalizeShotIdea = (shotIdea: string | null | undefined): string | null =
   return trimmed.length > 0 ? trimmed : null;
 };
 
+const generationStartedContextLines = (testMode: boolean): string[] => {
+  const lines = [
+    "Using the catalog product photo as the source. Results will appear here when ready.",
+  ];
+  if (testMode) {
+    lines.push(SLACK_FAKE_GENERATION_CONTEXT);
+  }
+  return lines;
+};
+
 export const buildSlackGenerationStartedFallbackText = (
   params: GenerationStartedMessageParams | string,
 ): string => {
-  const { sku, shotIdea } =
-    typeof params === "string" ? { sku: params, shotIdea: null } : params;
+  const { sku, shotIdea, testMode } =
+    typeof params === "string"
+      ? { sku: params, shotIdea: null, testMode: false }
+      : { testMode: false, ...params };
   const idea = normalizeShotIdea(shotIdea);
   const cost = formatOneProductCostLabel();
   const lines = [`✨ Generating ${sku}`, ""];
@@ -500,7 +514,7 @@ export const buildSlackGenerationStartedFallbackText = (
   lines.push(
     `${CANDIDATES_PER_REQUEST} lifestyle candidates · ${MVP_ASPECT_RATIO} portrait · ${cost}`,
     "",
-    "Using the catalog product photo as reference. Results will appear here when ready.",
+    ...generationStartedContextLines(Boolean(testMode)),
   );
   return lines.join("\n");
 };
@@ -508,8 +522,10 @@ export const buildSlackGenerationStartedFallbackText = (
 export const buildSlackGenerationStartedBlocks = (
   params: GenerationStartedMessageParams | string,
 ): SlackBlock[] => {
-  const { sku, shotIdea } =
-    typeof params === "string" ? { sku: params, shotIdea: null } : params;
+  const { sku, shotIdea, testMode } =
+    typeof params === "string"
+      ? { sku: params, shotIdea: null, testMode: false }
+      : { testMode: false, ...params };
   const idea = normalizeShotIdea(shotIdea);
   const cost = formatOneProductCostLabel();
   const blocks: SlackBlock[] = [
@@ -533,6 +549,19 @@ export const buildSlackGenerationStartedBlocks = (
     });
   }
 
+  const contextElements = [
+    {
+      type: "mrkdwn",
+      text: "Using the catalog product photo as the source. Results will appear here when ready.",
+    },
+  ];
+  if (testMode) {
+    contextElements.push({
+      type: "mrkdwn",
+      text: SLACK_FAKE_GENERATION_CONTEXT,
+    });
+  }
+
   blocks.push(
     {
       type: "section",
@@ -543,12 +572,7 @@ export const buildSlackGenerationStartedBlocks = (
     },
     {
       type: "context",
-      elements: [
-        {
-          type: "mrkdwn",
-          text: "Using the catalog product photo as reference. Results will appear here when ready.",
-        },
-      ],
+      elements: contextElements,
     },
   );
 

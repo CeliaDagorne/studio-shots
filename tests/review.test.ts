@@ -9,7 +9,7 @@ import {
   resolveRequestAfterReviews,
 } from "@/lib/review";
 import { candidateBlobPath } from "@/lib/blob";
-import { buildImageRefPrompt } from "@/lib/luma";
+import { buildImageEditCreateParams, buildImageEditPrompt } from "@/lib/luma";
 import { importPreviewKeyboard, reviewCandidateKeyboard } from "@/lib/telegram";
 import { requestPlanFromCounts } from "@/lib/request-planning";
 
@@ -78,15 +78,37 @@ test("candidate blob path follows candidates/{sku}/{candidateId}.jpg", () => {
   assert.equal(candidateBlobPath("SS-001", "abc"), "candidates/SS-001/abc.jpg");
 });
 
-test("buildImageRefPrompt preserves product fidelity guidance", () => {
-  const prompt = buildImageRefPrompt({
-    productName: "Lilac Ceramic Vase",
-    colorOrFinish: "Lilac",
-    material: "Stoneware",
+test("buildImageEditPrompt keeps Shot Idea and product framing constraints", () => {
+  const prompt = buildImageEditPrompt({
     shotIdea: "sunlit console table by a window, soft morning light",
   });
-  assert.match(prompt, /sunlit console table/);
-  assert.match(prompt, /lilac stoneware lilac ceramic vase/i);
+  assert.match(prompt, /^sunlit console table by a window, soft morning light\n\n/);
+  assert.match(prompt, /Preserve the exact product from the source image/);
+  assert.match(prompt, /Keep the complete product visible inside the frame/);
+  assert.match(prompt, /60–75%/);
+  assert.match(prompt, /Leave a clear safe margin around every edge/);
+  assert.match(prompt, /Do not crop, obscure, redesign or replace/);
+  assert.match(prompt, /Build the requested lifestyle environment around the product/);
+  assert.match(prompt, /Avoid large empty areas and plain white backgrounds/);
+  assert.match(prompt, /Props may support the scene but must never cover the product/);
+});
+
+test("buildImageEditCreateParams uses image_edit with catalog photo as source", () => {
+  const prompt = buildImageEditPrompt({
+    shotIdea: "evening coffee table, warm lamplight",
+  });
+  const photoUrl = "https://studio-shots.example/demo/ss-001-lilac-vase.png";
+  const body = buildImageEditCreateParams({ prompt, photoUrl });
+
+  assert.equal(body.type, "image_edit");
+  assert.equal(body.model, "uni-1");
+  assert.equal(body.output_format, "jpeg");
+  assert.equal(body.prompt, prompt);
+  assert.deepEqual(body.source, { url: photoUrl });
+  assert.equal("image_ref" in body, false);
+  assert.equal(body.image_ref, undefined);
+  assert.equal("aspect_ratio" in body, false);
+  assert.equal(body.aspect_ratio, undefined);
 });
 
 test("candidateCaption reflects review state", () => {

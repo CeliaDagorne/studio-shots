@@ -2,15 +2,37 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { runCandidateImagePipeline } from "@/lib/candidate-pipeline";
+import type { ImageGenerationProvider } from "@/lib/image-generation";
 
-test("runCandidateImagePipeline stores blob URL from mocked Luma + Blob deps", async () => {
+const mockProvider = (overrides: Partial<ImageGenerationProvider> = {}): ImageGenerationProvider => ({
+  name: "luma",
+  createGeneration: async () => ({
+    id: "luma-gen-1",
+    state: "queued",
+    outputUrl: null,
+    failureReason: null,
+  }),
+  pollUntilDone: async (id) => ({
+    id,
+    state: "completed",
+    outputUrl: "https://luma.example/presigned-expiring.jpg",
+    failureReason: null,
+  }),
+  storeCandidateImage: async (params) => ({
+    blobPath: `candidates/${params.sku}/${params.candidateId}.jpg`,
+    blobUrl: `https://blob.vercel-storage.com/candidates/${params.sku}/${params.candidateId}.jpg`,
+  }),
+  ...overrides,
+});
+
+test("runCandidateImagePipeline stores blob URL from mocked provider deps", async () => {
   let created = false;
   let polled = false;
   let uploaded = false;
 
   const result = await runCandidateImagePipeline(
-    {
-      createImageRefGeneration: async () => {
+    mockProvider({
+      createGeneration: async () => {
         created = true;
         return {
           id: "luma-gen-1",
@@ -19,7 +41,7 @@ test("runCandidateImagePipeline stores blob URL from mocked Luma + Blob deps", a
           failureReason: null,
         };
       },
-      pollGenerationUntilDone: async (id) => {
+      pollUntilDone: async (id) => {
         polled = true;
         assert.equal(id, "luma-gen-1");
         return {
@@ -29,7 +51,7 @@ test("runCandidateImagePipeline stores blob URL from mocked Luma + Blob deps", a
           failureReason: null,
         };
       },
-      downloadAndStoreCandidateImage: async (params) => {
+      storeCandidateImage: async (params) => {
         uploaded = true;
         assert.equal(params.sourceUrl, "https://luma.example/presigned-expiring.jpg");
         assert.equal(params.sku, "SS-001");
@@ -38,9 +60,10 @@ test("runCandidateImagePipeline stores blob URL from mocked Luma + Blob deps", a
           blobUrl: `https://blob.vercel-storage.com/candidates/${params.sku}/${params.candidateId}.jpg`,
         };
       },
-    },
+    }),
     {
       candidateId: "cand-1",
+      candidateIndex: 1,
       productSku: "SS-001",
       photoUrl: "/demo/ss-001-lilac-vase.png",
       prompt: "morning kitchen counter",
@@ -56,30 +79,31 @@ test("runCandidateImagePipeline stores blob URL from mocked Luma + Blob deps", a
   }
 });
 
-test("runCandidateImagePipeline records failure without calling Blob when Luma fails", async () => {
+test("runCandidateImagePipeline records failure without storing when generation fails", async () => {
   let uploaded = false;
 
   const result = await runCandidateImagePipeline(
-    {
-      createImageRefGeneration: async () => ({
+    mockProvider({
+      createGeneration: async () => ({
         id: "luma-gen-fail",
         state: "queued",
         outputUrl: null,
         failureReason: null,
       }),
-      pollGenerationUntilDone: async () => ({
+      pollUntilDone: async () => ({
         id: "luma-gen-fail",
         state: "failed",
         outputUrl: null,
         failureReason: "content_moderated",
       }),
-      downloadAndStoreCandidateImage: async () => {
+      storeCandidateImage: async () => {
         uploaded = true;
         return { blobPath: "x", blobUrl: "y" };
       },
-    },
+    }),
     {
       candidateId: "cand-fail",
+      candidateIndex: 1,
       productSku: "SS-001",
       photoUrl: "/demo/ss-001-lilac-vase.png",
       prompt: "test",

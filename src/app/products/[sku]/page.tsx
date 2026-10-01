@@ -142,7 +142,7 @@ export default async function ProductPage(props: PageProps) {
         <section className={styles.section} aria-labelledby="original-heading">
           <div className={styles.sectionHead}>
             <h2 id="original-heading">Original catalog photo</h2>
-            <p>White-background source used as the generation reference.</p>
+            <p>White-background catalog photo used as the generation source.</p>
           </div>
           <div className={styles.original}>
             <div className={styles.originalFrame}>

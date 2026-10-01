@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { and, asc, eq, sql } from "drizzle-orm";
 
 import { resolvePublicAssetUrl } from "@/lib/assets";
-import { downloadAndStoreCandidateImage } from "@/lib/blob";
 import { runCandidateImagePipeline } from "@/lib/candidate-pipeline";
 import { buildCampaignPageUrl } from "@/lib/campaigns";
 import {
@@ -15,11 +14,8 @@ import { getDb } from "@/lib/db";
 import { env } from "@/lib/env";
 import { deliverCandidateImage, notifyConversation } from "@/lib/generation-delivery";
 import { parseImportWarningsPayload } from "@/lib/import-meta";
-import {
-  buildImageRefPrompt,
-  createImageRefGeneration,
-  pollGenerationUntilDone,
-} from "@/lib/luma";
+import { getImageGenerationProvider } from "@/lib/image-generation-provider";
+import { buildImageEditPrompt } from "@/lib/luma";
 import {
   buildProductPageUrl,
   formatApprovalCompletionMessage,
@@ -33,7 +29,6 @@ import {
   candidateCaption,
   resolveRequestAfterReviews,
 } from "@/lib/review";
-import { MVP_ASPECT_RATIO } from "@/lib/request-planning";
 import { generationCandidates, imports, products, shotRequests } from "@/lib/schema";
 import { buildSlackCandidatesReadyBlocks } from "@/lib/slack-blocks";
 import {
@@ -172,32 +167,33 @@ const ensureRequestLeavesGenerating = async (shotRequestId: string, fallbackStat
 
 const processOneCandidate = async (params: {
   candidateId: string;
+  candidateIndex: number;
   productSku: string;
   photoUrl: string;
   prompt: string;
 }): Promise<"ready" | "failed"> => {
   const db = getDb();
-
-  const result = await runCandidateImagePipeline(
-    {
-      createImageRefGeneration: async (input) => {
-        const created = await createImageRefGeneration(input);
-        await db
-          .update(generationCandidates)
-          .set({
-            lumaGenerationId: created.id,
-            lumaState: created.state,
-            status: CANDIDATE_STATUS.submitted,
-            updatedAt: now(),
-          })
-          .where(eq(generationCandidates.id, params.candidateId));
-        return created;
-      },
-      pollGenerationUntilDone,
-      downloadAndStoreCandidateImage,
+  const baseProvider = getImageGenerationProvider();
+  const provider = {
+    ...baseProvider,
+    createGeneration: async (
+      input: Parameters<typeof baseProvider.createGeneration>[0],
+    ) => {
+      const created = await baseProvider.createGeneration(input);
+      await db
+        .update(generationCandidates)
+        .set({
+          lumaGenerationId: created.id,
+          lumaState: created.state,
+          status: CANDIDATE_STATUS.submitted,
+          updatedAt: now(),
+        })
+        .where(eq(generationCandidates.id, params.candidateId));
+      return created;
     },
-    params,
-  );
+  };
+
+  const result = await runCandidateImagePipeline(provider, params);
 
   if (result.status === "ready") {
     await db
@@ -257,10 +253,7 @@ export const runShotRequestGeneration = async (params: {
       throw new Error(`Product ${claimedRequest.productSku} not found`);
     }
 
-    const prompt = buildImageRefPrompt({
-      productName: product.productName,
-      colorOrFinish: product.colorOrFinish,
-      material: product.material,
+    const prompt = buildImageEditPrompt({
       shotIdea: claimedRequest.shotIdea,
     });
 
@@ -285,7 +278,7 @@ export const runShotRequestGeneration = async (params: {
     if (params.conversation.platform !== CHAT_PLATFORM.slack) {
       await notifyConversation(
         params.conversation,
-        `Generating 3 ${claimedRequest.productSku} candidates with image_ref at ${MVP_ASPECT_RATIO} (~$0.13). I'll send each photo when ready.`,
+        `Generating 3 ${claimedRequest.productSku} lifestyle candidates from the catalog product photo (~$0.13). I'll send each photo when ready.`,
       );
     }
 
@@ -293,6 +286,7 @@ export const runShotRequestGeneration = async (params: {
       candidateRows.map((row) =>
         processOneCandidate({
           candidateId: row.id,
+          candidateIndex: row.candidateIndex,
           productSku: row.productSku,
           photoUrl: resolvePublicAssetUrl(product.photoUrl, env.appUrl),
           prompt,

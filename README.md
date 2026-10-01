@@ -20,7 +20,7 @@ Telegram exposes the same shared services with `/import`, inline keyboards, and 
 
 - One authorized Slack workspace + channel per deployment (`SLACK_TEAM_ID`, `SLACK_CHANNEL_ID`)
 - One authorized Telegram chat per deployment (`ALLOWED_CHAT_ID`) when Telegram is used
-- Luma as the image-generation provider (`image_ref`, `uni-1`, `4:5`)
+- Luma as the image-generation provider (`image_edit` from the catalog product photo, `uni-1`)
 - Fixed candidate count (three per request); at least two approvals to mark a product done
 - Fixed per-image cost estimate constant (see [ARCHITECTURE.md](ARCHITECTURE.md))
 - One product generating at a time; no batch / generate-all
@@ -78,9 +78,21 @@ Use **new** Vercel, Neon, Slack app, and Blob credentials; do not reuse another 
 | `SLACK_TEAM_ID` | Allowlisted workspace |
 | `SLACK_CHANNEL_ID` | Allowlisted channel |
 
-Also required for any deployment: `APP_URL`, `DATABASE_URL`, `LUMA_AGENTS_API_KEY`, plus the Telegram vars in `.env.example`.
+Also required for any deployment: `APP_URL`, `DATABASE_URL`, plus the Telegram vars in `.env.example`.
 
-Blob uploads use Vercel OIDC on the linked project (no long-lived blob token required in env).
+### Image generation provider
+
+| Environment | Setting |
+|---|---|
+| Local / Vercel Preview | `IMAGE_GENERATION_PROVIDER=fake` |
+| Production | `IMAGE_GENERATION_PROVIDER=luma` |
+
+- **fake** returns deterministic demo candidates from `public/demo/`, never instantiates the Luma client, and does not require `LUMA_AGENTS_API_KEY`. Slack shows a visible test-mode context line. Fake mode is refused when `VERCEL_ENV=production`.
+- **luma** uses Luma Agents `image_edit` (requires `LUMA_AGENTS_API_KEY`).
+
+Unset defaults: `luma` only when `VERCEL_ENV=production`; otherwise `fake`.
+
+Blob uploads use Vercel OIDC on the linked project (no long-lived blob token required in env). Production Luma runs still persist candidates to Blob; fake mode serves public demo URLs.
 
 ### Slack app setup
 

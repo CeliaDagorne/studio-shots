@@ -10,7 +10,7 @@ Slack: attach CSV + @Studio Shots import
   → shared plan + cost preview (Neon)
   → Generate priority OR Choose a product (paginated)
   → claim request (imported_unconfirmed → generating)
-  → Luma image_ref × 3 (concurrent) @ 4:5
+  → Luma image_edit × 3 (concurrent; catalog photo as source)
   → download → Vercel Blob
   → Slack Block Kit candidates + Approve/Reject
     (or Telegram photos + inline keyboards)
@@ -42,7 +42,8 @@ Imports, shot requests, and generation candidates store that identity so deliver
 | `src/lib/imports.ts` | Idempotent CSV plan persistence (stable IDs, Neon transaction) |
 | `src/lib/generation.ts` | Atomic claim, Luma pipeline via `waitUntil`, shared `persistCandidateReview` |
 | `src/lib/generation-delivery.ts` | Platform delivery (Slack post vs Telegram send/edit) |
-| `src/lib/luma.ts` | `image_ref` + `uni-1` + aspect `4:5` |
+| `src/lib/luma.ts` | Luma Agents `image_edit` helpers (`uni-1`, catalog photo as `source`) |
+| `src/lib/image-generation*.ts` | Shared provider interface; `luma` + `fake` implementations; env selection |
 | `src/lib/blob.ts` | Durable public Blob URLs before chat delivery |
 | `src/lib/products.ts` | Product page query; approved-only filter |
 | `src/lib/status.ts` | Shared campaign aggregates (Telegram `/status` + web overview) |
@@ -100,7 +101,15 @@ Both adapters invoke the same planning (`imports.ts` / request planning), genera
 
 ## Cost model (estimate)
 
-Configured as integer micros USD per `image_ref` image (`IMAGE_REF_COST_USD_MICROS`, currently $0.0434). Preview and status views use that constant × candidates generated. Treat it as an estimate and update when provider pricing changes.
+Configured as integer micros USD per generated image (`IMAGE_REF_COST_USD_MICROS`, currently $0.0434; name retained for pricing constant continuity). Preview and status views use that constant × candidates generated. Treat it as an estimate and update when provider pricing changes.
+
+## Why image editing (product fidelity)
+
+Studio Shots uses Luma `type: "image_edit"` with the catalog packshot as `source` so lifestyle scenes are built **around** the real product instead of regenerating it. Prompts keep the catalog Shot Idea as creative direction and append fixed framing rules: keep the complete product visible, centered at roughly 60–75% of the frame, with safe margins and no crop/obscure/redesign. Luma derives edit output dimensions from the source image (`aspect_ratio` is ignored for `image_edit`), so the request omits aspect ratio and never silently falls back to `image_ref`.
+
+### Fake provider (local / Preview)
+
+Set `IMAGE_GENERATION_PROVIDER=fake` to exercise the full Slack import → generate → review → campaign-continuation path without calling or charging Luma. The fake provider returns three deterministic demo images from `public/demo/`, simulates a short delay for loading states, and persists candidates through the normal database and review flow. Production must use `IMAGE_GENERATION_PROVIDER=luma`; `fake` is refused when `VERCEL_ENV=production`.
 
 ## Out of scope (v1)
 

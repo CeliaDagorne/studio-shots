@@ -1,7 +1,6 @@
 import Luma from "luma-agents";
 
 import { env } from "@/lib/env";
-import { MVP_ASPECT_RATIO } from "@/lib/request-planning";
 
 export type LumaGenerationSnapshot = {
   id: string;
@@ -19,31 +18,54 @@ const getClient = () => {
   return client;
 };
 
-export const buildImageRefPrompt = (params: {
-  productName: string;
-  colorOrFinish: string;
-  material: string;
-  shotIdea: string;
-}): string =>
-  [
-    params.shotIdea.trim(),
-    `Preserve the exact ${params.colorOrFinish.toLowerCase()} ${params.material.toLowerCase()} ${params.productName.toLowerCase()}'s shape, color, proportions, and surface details.`,
-    "Natural lifestyle product photography, softly styled and not overly staged.",
-  ].join(" ");
+/**
+ * Fixed product-photography constraints appended to every catalog Shot Idea.
+ * These keep the full product recognizable when editing the source packshot.
+ */
+export const PRODUCT_PHOTOGRAPHY_CONSTRAINTS = [
+  "Preserve the exact product from the source image, including its shape, proportions, color, material and distinctive details.",
+  "Keep the complete product visible inside the frame.",
+  "Center the product and make it occupy approximately 60–75% of the image.",
+  "Leave a clear safe margin around every edge.",
+  "Do not crop, obscure, redesign or replace any part of the product.",
+  "Build the requested lifestyle environment around the product.",
+  "Avoid large empty areas and plain white backgrounds.",
+  "Props may support the scene but must never cover the product.",
+].join("\n");
 
-export const createImageRefGeneration = async (params: {
+/** Build the final image-edit prompt from the catalog Shot Idea + framing rules. */
+export const buildImageEditPrompt = (params: { shotIdea: string }): string => {
+  const idea = params.shotIdea.trim();
+  if (!idea) {
+    return PRODUCT_PHOTOGRAPHY_CONSTRAINTS;
+  }
+  return `${idea}\n\n${PRODUCT_PHOTOGRAPHY_CONSTRAINTS}`;
+};
+
+/**
+ * Exact Luma Agents create payload for product lifestyle edits.
+ * `aspect_ratio` is intentionally omitted: Luma ignores it for `image_edit`
+ * and derives output dimensions from the source catalog photo.
+ * Never falls back to `image_ref`.
+ */
+export const buildImageEditCreateParams = (params: {
+  prompt: string;
+  photoUrl: string;
+}): Luma.GenerationCreateParams => ({
+  type: "image_edit",
+  prompt: params.prompt,
+  model: "uni-1",
+  source: { url: params.photoUrl },
+  output_format: "jpeg",
+});
+
+export const createImageEditGeneration = async (params: {
   prompt: string;
   photoUrl: string;
 }): Promise<LumaGenerationSnapshot> => {
-  const generation = await getClient().generations.create({
-    prompt: params.prompt,
-    model: "uni-1",
-    image_ref: [{ url: params.photoUrl }],
-    // SDK typings omit 4:5; the Agents API accepts this portrait ratio for image_ref.
-    // @ts-expect-error aspect_ratio union is incomplete in luma-agents
-    aspect_ratio: MVP_ASPECT_RATIO,
-    output_format: "jpeg",
-  });
+  const generation = await getClient().generations.create(
+    buildImageEditCreateParams(params),
+  );
 
   return {
     id: generation.id,

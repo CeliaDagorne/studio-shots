@@ -1,17 +1,4 @@
-import type { LumaGenerationSnapshot } from "@/lib/luma";
-
-export type CandidatePipelineDeps = {
-  createImageRefGeneration: (params: {
-    prompt: string;
-    photoUrl: string;
-  }) => Promise<LumaGenerationSnapshot>;
-  pollGenerationUntilDone: (generationId: string) => Promise<LumaGenerationSnapshot>;
-  downloadAndStoreCandidateImage: (params: {
-    sourceUrl: string;
-    sku: string;
-    candidateId: string;
-  }) => Promise<{ blobPath: string; blobUrl: string }>;
-};
+import type { ImageGenerationProvider } from "@/lib/image-generation";
 
 export type CandidatePipelineResult =
   | {
@@ -28,33 +15,36 @@ export type CandidatePipelineResult =
       errorMessage: string;
     };
 
-/** Pure create → poll → blob flow. Inject mocks in tests; no paid calls unless deps are live. */
+/** Pure create → poll → store flow via the active image-generation provider. */
 export const runCandidateImagePipeline = async (
-  deps: CandidatePipelineDeps,
+  provider: ImageGenerationProvider,
   params: {
     candidateId: string;
+    candidateIndex: number;
     productSku: string;
     photoUrl: string;
     prompt: string;
   },
 ): Promise<CandidatePipelineResult> => {
   try {
-    const created = await deps.createImageRefGeneration({
+    const created = await provider.createGeneration({
       prompt: params.prompt,
       photoUrl: params.photoUrl,
+      candidateId: params.candidateId,
+      candidateIndex: params.candidateIndex,
     });
 
-    const finished = await deps.pollGenerationUntilDone(created.id);
+    const finished = await provider.pollUntilDone(created.id);
     if (finished.state !== "completed" || !finished.outputUrl) {
       return {
         status: "failed",
         lumaGenerationId: created.id,
         lumaState: finished.state,
-        errorMessage: finished.failureReason ?? "Luma generation failed",
+        errorMessage: finished.failureReason ?? "Image generation failed",
       };
     }
 
-    const stored = await deps.downloadAndStoreCandidateImage({
+    const stored = await provider.storeCandidateImage({
       sourceUrl: finished.outputUrl,
       sku: params.productSku,
       candidateId: params.candidateId,
