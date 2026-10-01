@@ -553,6 +553,24 @@ export const getImportById = async (importId: string) => {
   return rows[0] ?? null;
 };
 
+/** Latest persisted campaign for a chat conversation (Slack channel / Telegram chat). */
+export const getLatestImportForConversation = async (conversation: ChatConversation) => {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(imports)
+    .where(
+      and(
+        eq(imports.platform, conversation.platform),
+        eq(imports.conversationId, conversation.conversationId),
+      ),
+    )
+    .orderBy(desc(imports.createdAt))
+    .limit(1);
+
+  return rows[0] ?? null;
+};
+
 export const listActionableProductsForImport = (
   record: typeof imports.$inferSelect,
 ): ActionableProductOption[] => parseImportWarningsPayload(record.warnings).actionable;

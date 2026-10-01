@@ -220,7 +220,7 @@ test("unauthorized channel is acknowledged with a clear refusal message", async 
   });
 });
 
-test("app_mention in the allowlisted channel posts the Studio Shots help message", async () => {
+test("app_mention with help posts the Studio Shots help message", async () => {
   const { processSlackEventCallback, slackHelpMessage, slackHelpBlocks } = await import(
     "@/lib/slack"
   );
@@ -233,14 +233,192 @@ test("app_mention in the allowlisted channel posts the Studio Shots help message
       event: {
         type: "app_mention",
         channel: "C_ALLOWED",
-        text: "<@U_BOT> hello",
+        text: "<@U_BOT> help",
       },
     });
     assert.equal(result.handled, true);
+    assert.equal(result.reason, "help");
     assert.equal(posts.length, 1);
     assert.equal(posts[0]?.channel, "C_ALLOWED");
     assert.equal(posts[0]?.text, slackHelpMessage(process.env.APP_URL));
     assert.deepEqual(posts[0]?.blocks, slackHelpBlocks(process.env.APP_URL));
+  });
+});
+
+test("empty app_mention posts the Studio Shots help message", async () => {
+  const { processSlackEventCallback, slackHelpMessage } = await import("@/lib/slack");
+
+  await withMockedSlackPost(async (posts) => {
+    const result = await processSlackEventCallback({
+      type: "event_callback",
+      team_id: "T_ALLOWED",
+      event_id: "Ev_HELP_EMPTY",
+      event: {
+        type: "app_mention",
+        channel: "C_ALLOWED",
+        text: "<@U_BOT>",
+      },
+    });
+    assert.equal(result.handled, true);
+    assert.equal(result.reason, "help");
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0]?.text, slackHelpMessage(process.env.APP_URL));
+  });
+});
+
+test("unknown app_mention commands return a short supported-commands message", async () => {
+  const {
+    processSlackEventCallback,
+    SLACK_UNKNOWN_COMMAND_MESSAGE,
+    slackHelpMessage,
+  } = await import("@/lib/slack");
+
+  await withMockedSlackPost(async (posts) => {
+    const result = await processSlackEventCallback({
+      type: "event_callback",
+      team_id: "T_ALLOWED",
+      event_id: "Ev_UNKNOWN_1",
+      event: {
+        type: "app_mention",
+        channel: "C_ALLOWED",
+        text: "<@U_BOT> hello",
+      },
+    });
+    assert.equal(result.handled, true);
+    assert.equal(result.reason, "unknown_command");
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0]?.text, SLACK_UNKNOWN_COMMAND_MESSAGE);
+    assert.match(posts[0]!.text, /`help`/);
+    assert.match(posts[0]!.text, /`next`/);
+    assert.match(posts[0]!.text, /`status`/);
+    assert.notEqual(posts[0]?.text, slackHelpMessage(process.env.APP_URL));
+    assert.equal(posts[0]?.blocks, undefined);
+  });
+});
+
+test("campaign status commands show next product from live actionable state", async () => {
+  const { processSlackEventCallback } = await import("@/lib/slack");
+  const { SLACK_ACTION_IDS } = await import("@/lib/slack-blocks");
+
+  const sampleImport = {
+    id: "import-aaa",
+    priorityRequestSku: "SS-001",
+  } as never;
+
+  for (const phrase of ["next", "next up", "continue", "status"]) {
+    await withMockedSlackPost(async (posts) => {
+      const result = await processSlackEventCallback(
+        {
+          type: "event_callback",
+          team_id: "T_ALLOWED",
+          event_id: `Ev_STATUS_${phrase.replace(/\s+/g, "_")}`,
+          event: {
+            type: "app_mention",
+            channel: "C_ALLOWED",
+            text: `<@U_BOT> ${phrase}`,
+          },
+        },
+        {
+          getLatestImportForConversation: async () => sampleImport,
+          loadStillActionableProductsForImport: async () => [
+            { requestId: "req-1", sku: "SS-001", priority: "high" },
+            { requestId: "req-2", sku: "SS-002", priority: "normal" },
+          ],
+          appUrl: "https://studio-shots.example",
+        },
+      );
+
+      assert.equal(result.handled, true);
+      assert.equal(result.reason, "campaign_next");
+      assert.equal(posts.length, 1);
+      assert.match(posts[0]!.text, /➡️ Next up/);
+      assert.match(posts[0]!.text, /SS-001 · high priority/);
+      assert.doesNotMatch(posts[0]!.text, /Campaign complete/);
+
+      const serialized = JSON.stringify(posts[0]!.blocks);
+      assert.match(serialized, /➡️ \*Next up\*/);
+      assert.match(serialized, /\*SS-001\* · high priority/);
+      assert.match(serialized, /Generate SS-001/);
+      assert.match(serialized, /Choose another product/);
+      assert.match(serialized, /View campaign/);
+      assert.match(serialized, /https:\/\/studio-shots\.example\/campaigns\/import-aaa/);
+      assert.match(serialized, new RegExp(SLACK_ACTION_IDS.gen));
+      assert.match(serialized, new RegExp(SLACK_ACTION_IDS.choose));
+      assert.doesNotMatch(serialized, /"type":"divider"/);
+    });
+  }
+});
+
+test("campaign status commands show campaign complete when nothing remains", async () => {
+  const { processSlackEventCallback } = await import("@/lib/slack");
+
+  await withMockedSlackPost(async (posts) => {
+    const result = await processSlackEventCallback(
+      {
+        type: "event_callback",
+        team_id: "T_ALLOWED",
+        event_id: "Ev_STATUS_COMPLETE",
+        event: {
+          type: "app_mention",
+          channel: "C_ALLOWED",
+          text: "<@U_BOT> next",
+        },
+      },
+      {
+        getLatestImportForConversation: async () =>
+          ({ id: "import-done", priorityRequestSku: null }) as never,
+        loadStillActionableProductsForImport: async () => [],
+        appUrl: "https://studio-shots.example",
+      },
+    );
+
+    assert.equal(result.handled, true);
+    assert.equal(result.reason, "campaign_complete");
+    assert.equal(posts.length, 1);
+    assert.match(posts[0]!.text, /🎉 Campaign complete/);
+    assert.match(posts[0]!.text, /All actionable products have been reviewed/);
+    assert.doesNotMatch(posts[0]!.text, /Next up/);
+    assert.doesNotMatch(posts[0]!.text, /Generate /);
+
+    const serialized = JSON.stringify(posts[0]!.blocks);
+    assert.match(serialized, /🎉 Campaign complete/);
+    assert.match(serialized, /All actionable products have been reviewed/);
+    assert.match(serialized, /View campaign/);
+    assert.match(serialized, /https:\/\/studio-shots\.example\/campaigns\/import-done/);
+    assert.doesNotMatch(serialized, /Next up/);
+    assert.doesNotMatch(serialized, /Generate /);
+  });
+});
+
+test("campaign status commands ask to import when no campaign exists in the channel", async () => {
+  const { processSlackEventCallback, SLACK_NO_CAMPAIGN_MESSAGE } = await import("@/lib/slack");
+
+  await withMockedSlackPost(async (posts) => {
+    const result = await processSlackEventCallback(
+      {
+        type: "event_callback",
+        team_id: "T_ALLOWED",
+        event_id: "Ev_STATUS_MISSING",
+        event: {
+          type: "app_mention",
+          channel: "C_ALLOWED",
+          text: "<@U_BOT> continue",
+        },
+      },
+      {
+        getLatestImportForConversation: async () => null,
+        loadStillActionableProductsForImport: async () => {
+          throw new Error("should not load actionable products without a campaign");
+        },
+      },
+    );
+
+    assert.equal(result.handled, true);
+    assert.equal(result.reason, "no_campaign");
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0]?.text, SLACK_NO_CAMPAIGN_MESSAGE);
+    assert.match(posts[0]!.text, /import/);
+    assert.equal(posts[0]?.blocks, undefined);
   });
 });
 

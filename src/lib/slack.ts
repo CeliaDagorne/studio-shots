@@ -1,5 +1,17 @@
+import { buildCampaignPageUrl } from "@/lib/campaigns";
+import { slackConversation, type ChatConversation } from "@/lib/chat-identity";
 import { env } from "@/lib/env";
-import type { SlackBlock } from "@/lib/slack-blocks";
+import {
+  getLatestImportForConversation,
+  loadStillActionableProductsForImport,
+} from "@/lib/imports";
+import { selectNextActionableProduct } from "@/lib/product-selection";
+import type { ImportRow } from "@/lib/schema";
+import type { ActionableProductOption } from "@/types";
+import {
+  buildSlackCampaignStatusBlocks,
+  type SlackBlock,
+} from "@/lib/slack-blocks";
 import {
   isSlackImportIntent,
   runSlackCatalogImport,
@@ -85,6 +97,38 @@ export const slackHelpBlocks = (appUrl?: string): SlackBlock[] => [
   },
 ];
 
+export const SLACK_UNKNOWN_COMMAND_MESSAGE =
+  "I don't recognize that command. Try `help`, `import`, `next`, `next up`, `continue`, or `status`.";
+
+export const SLACK_NO_CAMPAIGN_MESSAGE =
+  "No campaign found in this channel yet. Attach a catalog CSV and mention @Studio Shots with `import`.";
+
+const CAMPAIGN_STATUS_COMMANDS = new Set(["next", "next up", "continue", "status"]);
+
+/** Strip bot mentions and normalize whitespace for command matching. */
+export const normalizeSlackMentionText = (text: string | undefined): string => {
+  if (!text) {
+    return "";
+  }
+  return text.replace(/<@[^>]+>/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+};
+
+export type SlackMentionCommand =
+  | { kind: "help" }
+  | { kind: "campaign_status" }
+  | { kind: "unknown"; text: string };
+
+export const parseSlackMentionCommand = (text: string | undefined): SlackMentionCommand => {
+  const normalized = normalizeSlackMentionText(text);
+  if (!normalized || normalized === "help") {
+    return { kind: "help" };
+  }
+  if (CAMPAIGN_STATUS_COMMANDS.has(normalized)) {
+    return { kind: "campaign_status" };
+  }
+  return { kind: "unknown", text: normalized };
+};
+
 type SlackApiResult = {
   ok: boolean;
   error?: string;
@@ -122,13 +166,32 @@ export const postSlackMessage = async (params: {
   return { ts: json.ts };
 };
 
+export type SlackEventDeps = {
+  postMessage?: typeof postSlackMessage;
+  getLatestImportForConversation?: (
+    conversation: ChatConversation,
+  ) => Promise<ImportRow | null>;
+  loadStillActionableProductsForImport?: (
+    record: ImportRow,
+  ) => Promise<ActionableProductOption[]>;
+  appUrl?: string;
+};
+
 /**
  * Handle a verified Slack event_callback after the HTTP ack has been (or will be) returned.
  * Unauthorized teams are ignored. Unauthorized channels get a clear refusal message.
  */
 export const processSlackEventCallback = async (
   payload: SlackEventCallback,
+  deps: SlackEventDeps = {},
 ): Promise<{ handled: boolean; reason?: string }> => {
+  const postMessage = deps.postMessage ?? postSlackMessage;
+  const getLatestImport =
+    deps.getLatestImportForConversation ?? getLatestImportForConversation;
+  const loadStillActionable =
+    deps.loadStillActionableProductsForImport ?? loadStillActionableProductsForImport;
+  const appUrl = deps.appUrl ?? env.appUrl;
+
   if (!isAllowedSlackTeam(payload.team_id)) {
     return { handled: false, reason: "unauthorized_team" };
   }
@@ -145,7 +208,7 @@ export const processSlackEventCallback = async (
   }
 
   if (!isAllowedSlackChannel(channel)) {
-    await postSlackMessage({
+    await postMessage({
       channel,
       text: SLACK_IMPORT_MESSAGES.unauthorizedChannel,
     });
@@ -158,7 +221,7 @@ export const processSlackEventCallback = async (
       externalEventId: payload.event_id,
       files: mention.files,
       deps: {
-        postMessage: postSlackMessage,
+        postMessage,
       },
     });
     return {
@@ -167,11 +230,52 @@ export const processSlackEventCallback = async (
     };
   }
 
-  await postSlackMessage({
-    channel,
-    text: slackHelpMessage(env.appUrl),
-    blocks: slackHelpBlocks(env.appUrl),
+  const command = parseSlackMentionCommand(mention.text);
+
+  if (command.kind === "help") {
+    await postMessage({
+      channel,
+      text: slackHelpMessage(appUrl),
+      blocks: slackHelpBlocks(appUrl),
+    });
+    return { handled: true, reason: "help" };
+  }
+
+  if (command.kind === "unknown") {
+    await postMessage({
+      channel,
+      text: SLACK_UNKNOWN_COMMAND_MESSAGE,
+    });
+    return { handled: true, reason: "unknown_command" };
+  }
+
+  const conversation = slackConversation(channel);
+  const latestImport = await getLatestImport(conversation);
+  if (!latestImport) {
+    await postMessage({
+      channel,
+      text: SLACK_NO_CAMPAIGN_MESSAGE,
+    });
+    return { handled: true, reason: "no_campaign" };
+  }
+
+  const remaining = await loadStillActionable(latestImport);
+  const nextProduct = selectNextActionableProduct(remaining);
+  const campaignPageUrl = buildCampaignPageUrl(appUrl, latestImport.id);
+  const status = buildSlackCampaignStatusBlocks({
+    importId: latestImport.id,
+    campaignPageUrl,
+    nextProduct,
   });
 
-  return { handled: true, reason: "help" };
+  await postMessage({
+    channel,
+    text: status.text,
+    blocks: status.blocks,
+  });
+
+  return {
+    handled: true,
+    reason: nextProduct ? "campaign_next" : "campaign_complete",
+  };
 };

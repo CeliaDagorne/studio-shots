@@ -682,7 +682,10 @@ const buildCampaignContinuationBlocks = (params: {
   importId: string;
   campaignPageUrl?: string | null;
   nextProduct: ActionableProductOption | null;
+  includeDivider?: boolean;
 }): SlackBlock[] => {
+  const includeDivider = params.includeDivider !== false;
+
   if (params.nextProduct) {
     const elements = [
       button({
@@ -709,8 +712,11 @@ const buildCampaignContinuationBlocks = (params: {
         }),
       );
     }
-    return [
-      { type: "divider" },
+    const blocks: SlackBlock[] = [];
+    if (includeDivider) {
+      blocks.push({ type: "divider" });
+    }
+    blocks.push(
       {
         type: "section",
         text: {
@@ -723,11 +729,15 @@ const buildCampaignContinuationBlocks = (params: {
         block_id: `ss_continue:${params.importId}:${params.nextProduct.sku}`,
         elements,
       },
-    ];
+    );
+    return blocks;
   }
 
-  const completeBlocks: SlackBlock[] = [
-    { type: "divider" },
+  const completeBlocks: SlackBlock[] = [];
+  if (includeDivider) {
+    completeBlocks.push({ type: "divider" });
+  }
+  completeBlocks.push(
     {
       type: "header",
       text: {
@@ -743,7 +753,7 @@ const buildCampaignContinuationBlocks = (params: {
         text: "All actionable products have been reviewed.",
       },
     },
-  ];
+  );
 
   if (params.campaignPageUrl) {
     completeBlocks.push({
@@ -760,6 +770,55 @@ const buildCampaignContinuationBlocks = (params: {
 
   return completeBlocks;
 };
+
+export const buildSlackCampaignStatusFallbackText = (params: {
+  nextProduct: ActionableProductOption | null;
+  campaignPageUrl?: string | null;
+}): string => {
+  if (params.nextProduct) {
+    const lines = [
+      "➡️ Next up",
+      "",
+      `${params.nextProduct.sku} · ${params.nextProduct.priority} priority`,
+      "",
+      `Generate ${params.nextProduct.sku}`,
+      "Choose another product",
+    ];
+    if (params.campaignPageUrl) {
+      lines.push("", `View campaign: ${params.campaignPageUrl}`);
+    }
+    return lines.join("\n");
+  }
+
+  const lines = [
+    "🎉 Campaign complete",
+    "",
+    "All actionable products have been reviewed.",
+  ];
+  if (params.campaignPageUrl) {
+    lines.push("", `View campaign: ${params.campaignPageUrl}`);
+  }
+  return lines.join("\n");
+};
+
+/** Standalone campaign status / continuation message for Slack mentions. */
+export const buildSlackCampaignStatusBlocks = (params: {
+  importId: string;
+  campaignPageUrl: string;
+  nextProduct: ActionableProductOption | null;
+}): { text: string; blocks: SlackBlock[] } => ({
+  text: buildSlackCampaignStatusFallbackText({
+    nextProduct: params.nextProduct,
+    campaignPageUrl: params.campaignPageUrl,
+  }),
+  blocks: buildCampaignContinuationBlocks({
+    sku: params.nextProduct?.sku ?? "complete",
+    importId: params.importId,
+    campaignPageUrl: params.campaignPageUrl,
+    nextProduct: params.nextProduct,
+    includeDivider: false,
+  }),
+});
 
 export const buildSlackProductResolutionBlocks = (params: {
   outcome: "approved" | "needs_regeneration";
