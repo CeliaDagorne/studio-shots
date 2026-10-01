@@ -1,5 +1,6 @@
 import type { ActionableProductOption } from "@/types";
 
+import { selectHighestPrioritySku } from "@/lib/request-planning";
 import { WORKFLOW } from "@/lib/review";
 
 export type ShotRequestSelectionSnapshot = {
@@ -30,7 +31,24 @@ export const filterActionableOptionsByStatus = (
   });
 
 /**
- * Validate a Telegram gen callback against the import's actionable list and
+ * Pick the next product to generate using shared priority ordering.
+ * Ties keep the first matching option in the given (catalog) order.
+ */
+export const selectNextActionableProduct = (
+  options: ActionableProductOption[],
+): ActionableProductOption | null => {
+  if (options.length === 0) {
+    return null;
+  }
+  const best = selectHighestPrioritySku(options);
+  if (!best) {
+    return null;
+  }
+  return options.find((option) => option.sku === best.sku) ?? null;
+};
+
+/**
+ * Validate a gen callback against the import's actionable list and
  * the live shot-request row.
  */
 export const evaluateProductSelection = (params: {

@@ -220,15 +220,39 @@ test("product approved Block Kit uses View product and View campaign links", asy
     approvalCount: 2,
     productPageUrl: "https://studio-shots.example/products/SS-001",
     campaignPageUrl: "https://studio-shots.example/campaigns/import-1",
+    importId: "import-1",
+    nextProduct: { requestId: "req-2", sku: "SS-002", priority: "high" },
   });
   const serialized = JSON.stringify(built.blocks);
   assert.match(serialized, /✅ SS-001 approved/);
   assert.match(serialized, /\*2 candidates approved\./);
   assert.match(serialized, /View product/);
+  assert.match(serialized, /➡️ \*Next up\*/);
+  assert.match(serialized, /Generate SS-002/);
+  assert.match(serialized, /Choose another product/);
   assert.match(serialized, /View campaign/);
   assert.match(serialized, /https:\/\/studio-shots\.example\/products\/SS-001/);
   assert.match(serialized, /https:\/\/studio-shots\.example\/campaigns\/import-1/);
   assert.match(built.text, /View product:/);
+});
+
+test("campaign complete Block Kit replaces next-product actions when nothing remains", async () => {
+  const { buildSlackProductResolutionBlocks } = await import("@/lib/slack-blocks");
+  const built = buildSlackProductResolutionBlocks({
+    outcome: "approved",
+    sku: "SS-004",
+    approvalCount: 2,
+    productPageUrl: "https://studio-shots.example/products/SS-004",
+    campaignPageUrl: "https://studio-shots.example/campaigns/import-1",
+    importId: "import-1",
+    nextProduct: null,
+  });
+  const serialized = JSON.stringify(built.blocks);
+  assert.match(serialized, /🎉 Campaign complete/);
+  assert.match(serialized, /All actionable products have been reviewed/);
+  assert.match(serialized, /View campaign/);
+  assert.doesNotMatch(serialized, /Next up/);
+  assert.doesNotMatch(serialized, /Generate /);
 });
 
 test("product picker stays within Slack action block limits", async () => {
@@ -352,6 +376,53 @@ test("manual SKU selection validates request id and sku server-side", async () =
   );
   assert.match(mismatch.httpBody.text, /does not match/i);
   assert.equal(mismatch.background, undefined);
+});
+
+test("duplicate Generate clicks are refused once the request is no longer actionable", async () => {
+  const { handleSlackBlockAction } = await import("@/lib/slack-actions");
+  const { SLACK_ACTION_IDS, encodeSlackGenValue } = await import("@/lib/slack-blocks");
+
+  let selectedCalls = 0;
+  const first = await handleSlackBlockAction(
+    blockActionPayload({
+      actionId: SLACK_ACTION_IDS.gen,
+      value: encodeSlackGenValue("import-aaa", "req-normal", "SS-002"),
+      triggerId: "trig-gen-dup-a",
+    }),
+    {
+      ...baseDeps().deps,
+      runSelectedRequestGeneration: async () => {
+        selectedCalls += 1;
+      },
+    },
+  );
+  assert.match(first.httpBody.text, /✨ Generating SS-002/);
+  assert.ok(first.background);
+  await first.background!();
+  assert.equal(selectedCalls, 1);
+
+  const second = await handleSlackBlockAction(
+    blockActionPayload({
+      actionId: SLACK_ACTION_IDS.gen,
+      value: encodeSlackGenValue("import-aaa", "req-normal", "SS-002"),
+      triggerId: "trig-gen-dup-b",
+    }),
+    {
+      ...baseDeps().deps,
+      loadStillActionableProductsForImport: async () => [],
+      getShotRequestById: async () => ({
+        id: "req-normal",
+        productSku: "SS-002",
+        workflowStatus: "generating",
+      }),
+      runSelectedRequestGeneration: async () => {
+        selectedCalls += 1;
+      },
+    },
+  );
+  assert.match(second.httpBody.text, /no longer available/i);
+  assert.equal(second.background, undefined);
+  assert.equal(selectedCalls, 1);
 });
 
 test("cancel updates the Slack message without changing the import", async () => {

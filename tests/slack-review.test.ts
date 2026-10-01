@@ -98,8 +98,18 @@ const baseDeps = (candidate: GenerationCandidateRow = sampleCandidate()) => {
   const seen = new Set<string>();
   let stored = candidate;
   const responsePosts: SlackInteractionResponse[] = [];
+  const notifications: Array<{ text: string; blocks?: SlackBlock[] }> = [];
   const deps: SlackActionDeps = {
     getCandidateById: async (id: string) => (id === stored.id ? stored : null),
+    getImportById: async () =>
+      ({
+        id: "import-1",
+        platform: "slack",
+        conversationId: "C_ALLOWED",
+        priorityRequestSku: null,
+        warnings: { warnings: [], actionable: [] },
+      }) as never,
+    loadStillActionableProductsForImport: async () => [],
     persistCandidateReview: async ({
       candidateId,
       decision,
@@ -155,10 +165,12 @@ const baseDeps = (candidate: GenerationCandidateRow = sampleCandidate()) => {
     postResponseUrl: async (_url, body) => {
       responsePosts.push(body);
     },
+    notifyConversation: async (_conversation, text, options) => {
+      notifications.push({ text, blocks: options?.blocks as SlackBlock[] | undefined });
+    },
     appUrl: "https://studio-shots.example",
     isAllowedTeam: (teamId: string) => teamId === "T_ALLOWED",
     isAllowedChannel: (channelId: string) => channelId === "C_ALLOWED",
-    notifyConversation: async () => undefined,
   };
   return {
     candidateRef: () => stored,
@@ -166,6 +178,7 @@ const baseDeps = (candidate: GenerationCandidateRow = sampleCandidate()) => {
       stored = next;
     },
     responsePosts,
+    notifications,
     deps,
   };
 };
@@ -524,10 +537,9 @@ test("candidate from another Slack conversation is rejected", async () => {
   );
 });
 
-test("request completion notification runs only when newly resolved", async () => {
+test("request completion offers the next actionable product from live campaign state", async () => {
   const { handleSlackBlockAction } = await import("@/lib/slack-actions");
-  const { SLACK_ACTION_IDS } = await import("@/lib/slack-blocks");
-  const notifications: string[] = [];
+  const { SLACK_ACTION_IDS, encodeSlackGenValue } = await import("@/lib/slack-blocks");
   const ctx = baseDeps();
   ctx.deps.persistCandidateReview = async () => ({
     alreadyReviewed: false,
@@ -541,9 +553,138 @@ test("request completion notification runs only when newly resolved", async () =
     importId: "import-1",
     newlyResolved: true,
   });
-  ctx.deps.notifyConversation = async (_conversation, text) => {
-    notifications.push(text);
-  };
+  ctx.deps.loadStillActionableProductsForImport = async () => [
+    { requestId: "req-low", sku: "SS-004", priority: "low" },
+    { requestId: "req-high", sku: "SS-002", priority: "high" },
+    { requestId: "req-normal", sku: "SS-003", priority: "normal" },
+  ];
+
+  const result = await handleSlackBlockAction(
+    blockActionPayload({
+      actionId: SLACK_ACTION_IDS.approve,
+      value: "cand-1",
+      triggerId: "trig-next-product",
+    }),
+    ctx.deps,
+  );
+  assert.ok(result.background);
+  await result.background!();
+
+  assert.equal(ctx.notifications.length, 1);
+  const notification = ctx.notifications[0]!;
+  assert.match(notification.text, /✅ SS-001 approved/);
+  assert.match(notification.text, /➡️ Next up/);
+  assert.match(notification.text, /SS-002 · high priority/);
+  assert.doesNotMatch(notification.text, /Campaign complete/);
+
+  const serialized = JSON.stringify(notification.blocks);
+  assert.match(serialized, /➡️ \*Next up\*/);
+  assert.match(serialized, /\*SS-002\* · high priority/);
+  assert.match(serialized, /Generate SS-002/);
+  assert.match(serialized, /Choose another product/);
+  assert.match(serialized, /View campaign/);
+  assert.match(serialized, new RegExp(SLACK_ACTION_IDS.gen));
+  assert.match(serialized, new RegExp(SLACK_ACTION_IDS.choose));
+  assert.match(
+    serialized,
+    new RegExp(encodeSlackGenValue("import-1", "req-high", "SS-002")),
+  );
+});
+
+test("fully rejected products also continue the campaign with next product actions", async () => {
+  const { handleSlackBlockAction } = await import("@/lib/slack-actions");
+  const { SLACK_ACTION_IDS } = await import("@/lib/slack-blocks");
+  const ctx = baseDeps();
+  ctx.deps.persistCandidateReview = async () => ({
+    alreadyReviewed: false,
+    candidate: {
+      ...ctx.candidateRef(),
+      reviewDecision: "rejected",
+    },
+    existingDecision: "rejected",
+    requestStatus: "needs_regeneration",
+    approvedCount: 0,
+    importId: "import-1",
+    newlyResolved: true,
+  });
+  ctx.deps.loadStillActionableProductsForImport = async () => [
+    { requestId: "req-next", sku: "SS-003", priority: "normal" },
+  ];
+
+  const result = await handleSlackBlockAction(
+    blockActionPayload({
+      actionId: SLACK_ACTION_IDS.reject,
+      value: "cand-1",
+      triggerId: "trig-rejected-continue",
+    }),
+    ctx.deps,
+  );
+  assert.ok(result.background);
+  await result.background!();
+
+  assert.equal(ctx.notifications.length, 1);
+  const notification = ctx.notifications[0]!;
+  assert.match(notification.text, /⚠️ SS-001 needs regeneration/);
+  assert.match(notification.text, /SS-003 · normal priority/);
+  assert.match(JSON.stringify(notification.blocks), /Choose another product/);
+  assert.match(JSON.stringify(notification.blocks), /Generate SS-003/);
+});
+
+test("completed campaigns show campaign complete instead of next product actions", async () => {
+  const { handleSlackBlockAction } = await import("@/lib/slack-actions");
+  const { SLACK_ACTION_IDS } = await import("@/lib/slack-blocks");
+  const ctx = baseDeps();
+  ctx.deps.persistCandidateReview = async () => ({
+    alreadyReviewed: false,
+    candidate: {
+      ...ctx.candidateRef(),
+      reviewDecision: "approved",
+    },
+    existingDecision: "approved",
+    requestStatus: "approved",
+    approvedCount: 2,
+    importId: "import-1",
+    newlyResolved: true,
+  });
+  ctx.deps.loadStillActionableProductsForImport = async () => [];
+
+  const result = await handleSlackBlockAction(
+    blockActionPayload({
+      actionId: SLACK_ACTION_IDS.approve,
+      value: "cand-1",
+      triggerId: "trig-campaign-complete",
+    }),
+    ctx.deps,
+  );
+  assert.ok(result.background);
+  await result.background!();
+
+  assert.equal(ctx.notifications.length, 1);
+  const notification = ctx.notifications[0]!;
+  assert.match(notification.text, /🎉 Campaign complete/);
+  assert.match(notification.text, /All actionable products have been reviewed/);
+  assert.doesNotMatch(notification.text, /Next up/);
+  assert.doesNotMatch(notification.text, /Generate /);
+  assert.match(JSON.stringify(notification.blocks), /View campaign/);
+  assert.doesNotMatch(JSON.stringify(notification.blocks), /Choose another product/);
+});
+
+test("request completion notification runs only when newly resolved", async () => {
+  const { handleSlackBlockAction } = await import("@/lib/slack-actions");
+  const { SLACK_ACTION_IDS } = await import("@/lib/slack-blocks");
+  const ctx = baseDeps();
+  ctx.deps.persistCandidateReview = async () => ({
+    alreadyReviewed: false,
+    candidate: {
+      ...ctx.candidateRef(),
+      reviewDecision: "approved",
+    },
+    existingDecision: "approved",
+    requestStatus: "approved",
+    approvedCount: 2,
+    importId: "import-1",
+    newlyResolved: true,
+  });
 
   const result = await handleSlackBlockAction(
     blockActionPayload({
@@ -555,9 +696,8 @@ test("request completion notification runs only when newly resolved", async () =
   );
   assert.ok(result.background);
   await result.background!();
-  assert.equal(notifications.length, 1);
-  assert.match(notifications[0]!, /✅ SS-001 approved/);
-  assert.match(notifications[0]!, /2 candidates approved/);
-  assert.match(notifications[0]!, /View product:/);
-  assert.match(notifications[0]!, /View campaign:/);
+  assert.equal(ctx.notifications.length, 1);
+  assert.match(ctx.notifications[0]!.text, /✅ SS-001 approved/);
+  assert.match(ctx.notifications[0]!.text, /View product:/);
+  assert.match(ctx.notifications[0]!.text, /Campaign complete/);
 });

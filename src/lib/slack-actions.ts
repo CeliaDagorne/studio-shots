@@ -20,6 +20,7 @@ import {
 } from "@/lib/products";
 import {
   evaluateProductSelection,
+  selectNextActionableProduct,
   selectionErrorMessage,
 } from "@/lib/product-selection";
 import { CANDIDATE_STATUS, PRIORITY_CANDIDATE_COUNT, REVIEW_DECISION, WORKFLOW } from "@/lib/review";
@@ -32,7 +33,7 @@ import {
   buildSlackGenerationStartedFallbackText,
   buildSlackImportPreviewBlocks,
   buildSlackImportPreviewFallbackText,
-  buildSlackProductApprovedBlocks,
+  buildSlackProductResolutionBlocks,
   buildSlackProductPickerBlocks,
   buildSlackProductPickerLoadingBlocks,
   finalizeSlackCandidateMessageBlocks,
@@ -569,34 +570,44 @@ export const handleSlackBlockAction = async (
             return;
           }
 
-          if (
-            persisted.requestStatus === WORKFLOW.approved &&
-            persisted.approvedCount !== null &&
-            persisted.candidate
-          ) {
-            const productPageUrl = buildProductPageUrl(
-              appUrl,
-              persisted.candidate.productSku,
-            );
-            const campaignPageUrl = persisted.importId
-              ? buildCampaignPageUrl(appUrl, persisted.importId)
-              : null;
-            const approved = buildSlackProductApprovedBlocks({
-              sku: persisted.candidate.productSku,
-              approvalCount: persisted.approvedCount,
-              productPageUrl,
-              campaignPageUrl,
-            });
-            await notify(conversation, approved.text, { blocks: approved.blocks });
-          } else if (
-            persisted.requestStatus === WORKFLOW.needsRegeneration &&
-            persisted.candidate
-          ) {
-            await notify(
-              conversation,
-              `${persisted.candidate.productSku} needs regeneration (${persisted.approvedCount ?? 0} approvals; need at least 2).`,
-            );
+          const isTerminal =
+            persisted.requestStatus === WORKFLOW.approved ||
+            persisted.requestStatus === WORKFLOW.needsRegeneration;
+
+          if (!isTerminal || !persisted.candidate) {
+            return;
           }
+
+          const productPageUrl = buildProductPageUrl(
+            appUrl,
+            persisted.candidate.productSku,
+          );
+          const campaignPageUrl = persisted.importId
+            ? buildCampaignPageUrl(appUrl, persisted.importId)
+            : null;
+
+          let nextProduct = null;
+          if (persisted.importId) {
+            const importRecord = await getImport(persisted.importId);
+            if (importRecord) {
+              const remaining = await loadStillActionable(importRecord);
+              nextProduct = selectNextActionableProduct(remaining);
+            }
+          }
+
+          const resolution = buildSlackProductResolutionBlocks({
+            outcome:
+              persisted.requestStatus === WORKFLOW.approved
+                ? "approved"
+                : "needs_regeneration",
+            sku: persisted.candidate.productSku,
+            approvalCount: persisted.approvedCount ?? 0,
+            productPageUrl,
+            campaignPageUrl,
+            importId: persisted.importId,
+            nextProduct,
+          });
+          await notify(conversation, resolution.text, { blocks: resolution.blocks });
         } finally {
           releaseAction(reviewClaimKey);
         }

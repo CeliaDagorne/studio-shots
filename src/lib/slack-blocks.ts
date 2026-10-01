@@ -572,67 +572,234 @@ export const buildSlackProductApprovedFallbackText = (params: {
   approvalCount: number;
   productPageUrl: string;
   campaignPageUrl?: string | null;
-}): string => {
-  const lines = [
-    `✅ ${params.sku} approved`,
-    "",
-    `${params.approvalCount} candidates approved. This product is complete.`,
-    "",
-    `View product: ${params.productPageUrl}`,
-  ];
-  if (params.campaignPageUrl) {
-    lines.push(`View campaign: ${params.campaignPageUrl}`);
-  }
-  return lines.join("\n");
-};
+  nextProduct?: ActionableProductOption | null;
+  importId?: string | null;
+}): string => buildSlackProductResolutionFallbackText({
+  ...params,
+  outcome: "approved",
+});
 
 export const buildSlackProductApprovedBlocks = (params: {
   sku: string;
   approvalCount: number;
   productPageUrl: string;
   campaignPageUrl?: string | null;
-}): { text: string; blocks: SlackBlock[] } => {
-  const text = buildSlackProductApprovedFallbackText(params);
-  const linkButtons = [
-    button({
-      text: "View product",
-      url: params.productPageUrl,
-    }),
-  ];
-  if (params.campaignPageUrl) {
-    linkButtons.push(
-      button({
-        text: "View campaign",
-        url: params.campaignPageUrl,
-      }),
+  nextProduct?: ActionableProductOption | null;
+  importId?: string | null;
+}): { text: string; blocks: SlackBlock[] } =>
+  buildSlackProductResolutionBlocks({
+    ...params,
+    outcome: "approved",
+  });
+
+export const buildSlackProductResolutionFallbackText = (params: {
+  outcome: "approved" | "needs_regeneration";
+  sku: string;
+  approvalCount: number;
+  productPageUrl: string;
+  campaignPageUrl?: string | null;
+  nextProduct?: ActionableProductOption | null;
+  importId?: string | null;
+}): string => {
+  const lines =
+    params.outcome === "approved"
+      ? [
+          `✅ ${params.sku} approved`,
+          "",
+          `${params.approvalCount} candidates approved. This product is complete.`,
+          "",
+          `View product: ${params.productPageUrl}`,
+        ]
+      : [
+          `⚠️ ${params.sku} needs regeneration`,
+          "",
+          `${params.approvalCount} approvals. Need at least ${MIN_APPROVALS_TO_COMPLETE} to complete this product.`,
+        ];
+
+  if (params.nextProduct && params.importId) {
+    lines.push(
+      "",
+      "➡️ Next up",
+      `${params.nextProduct.sku} · ${params.nextProduct.priority} priority`,
+      "",
+      `Generate ${params.nextProduct.sku}`,
+      "Choose another product",
     );
+  } else if (params.importId) {
+    lines.push("", "🎉 Campaign complete", "", "All actionable products have been reviewed.");
   }
 
-  return {
-    text,
-    blocks: [
-      {
-        type: "header",
-        text: {
-          type: "plain_text",
-          text: `✅ ${params.sku} approved`.slice(0, 150),
-          emoji: true,
-        },
-      },
+  if (params.campaignPageUrl) {
+    lines.push("", `View campaign: ${params.campaignPageUrl}`);
+  }
+
+  return lines.join("\n");
+};
+
+const buildCampaignContinuationBlocks = (params: {
+  sku: string;
+  importId: string;
+  campaignPageUrl?: string | null;
+  nextProduct: ActionableProductOption | null;
+}): SlackBlock[] => {
+  if (params.nextProduct) {
+    const elements = [
+      button({
+        actionId: SLACK_ACTION_IDS.gen,
+        text: `Generate ${params.nextProduct.sku}`,
+        value: encodeSlackGenValue(
+          params.importId,
+          params.nextProduct.requestId,
+          params.nextProduct.sku,
+        ),
+        style: "primary",
+      }),
+      button({
+        actionId: SLACK_ACTION_IDS.choose,
+        text: "Choose another product",
+        value: encodeSlackImportValue(params.importId),
+      }),
+    ];
+    if (params.campaignPageUrl) {
+      elements.push(
+        button({
+          text: "View campaign",
+          url: params.campaignPageUrl,
+        }),
+      );
+    }
+    return [
+      { type: "divider" },
       {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: `*${params.approvalCount} candidates approved.* This product is complete.`,
+          text: `➡️ *Next up*\n*${params.nextProduct.sku}* · ${params.nextProduct.priority} priority`,
         },
       },
       {
         type: "actions",
-        block_id: `ss_approved_links:${params.sku}`,
-        elements: linkButtons,
+        block_id: `ss_continue:${params.importId}:${params.nextProduct.sku}`,
+        elements,
       },
-    ],
-  };
+    ];
+  }
+
+  const completeBlocks: SlackBlock[] = [
+    { type: "divider" },
+    {
+      type: "header",
+      text: {
+        type: "plain_text",
+        text: "🎉 Campaign complete",
+        emoji: true,
+      },
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: "All actionable products have been reviewed.",
+      },
+    },
+  ];
+
+  if (params.campaignPageUrl) {
+    completeBlocks.push({
+      type: "actions",
+      block_id: `ss_campaign_complete:${params.importId || params.sku}`,
+      elements: [
+        button({
+          text: "View campaign",
+          url: params.campaignPageUrl,
+        }),
+      ],
+    });
+  }
+
+  return completeBlocks;
+};
+
+export const buildSlackProductResolutionBlocks = (params: {
+  outcome: "approved" | "needs_regeneration";
+  sku: string;
+  approvalCount: number;
+  productPageUrl: string;
+  campaignPageUrl?: string | null;
+  nextProduct?: ActionableProductOption | null;
+  importId?: string | null;
+}): { text: string; blocks: SlackBlock[] } => {
+  const text = buildSlackProductResolutionFallbackText(params);
+  const blocks: SlackBlock[] =
+    params.outcome === "approved"
+      ? [
+          {
+            type: "header",
+            text: {
+              type: "plain_text",
+              text: `✅ ${params.sku} approved`.slice(0, 150),
+              emoji: true,
+            },
+          },
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `*${params.approvalCount} candidates approved.* This product is complete.`,
+            },
+          },
+          {
+            type: "actions",
+            block_id: `ss_approved_links:${params.sku}`,
+            elements: [
+              button({
+                text: "View product",
+                url: params.productPageUrl,
+              }),
+            ],
+          },
+        ]
+      : [
+          {
+            type: "header",
+            text: {
+              type: "plain_text",
+              text: `⚠️ ${params.sku} needs regeneration`.slice(0, 150),
+              emoji: true,
+            },
+          },
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `*${params.approvalCount} approvals.* Need at least ${MIN_APPROVALS_TO_COMPLETE} to complete this product.`,
+            },
+          },
+        ];
+
+  if (params.importId) {
+    blocks.push(
+      ...buildCampaignContinuationBlocks({
+        sku: params.sku,
+        importId: params.importId,
+        campaignPageUrl: params.campaignPageUrl,
+        nextProduct: params.nextProduct ?? null,
+      }),
+    );
+  } else if (params.campaignPageUrl) {
+    blocks.push({
+      type: "actions",
+      block_id: `ss_resolution_links:${params.sku}`,
+      elements: [
+        button({
+          text: "View campaign",
+          url: params.campaignPageUrl,
+        }),
+      ],
+    });
+  }
+
+  return { text, blocks };
 };
 
 export const encodeSlackCandidateValue = (candidateId: string): string => candidateId;

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   evaluateProductSelection,
   filterActionableOptionsByStatus,
+  selectNextActionableProduct,
   selectionErrorMessage,
 } from "@/lib/product-selection";
 import {
@@ -120,6 +121,10 @@ test("priority shortcut selects the highest-priority actionable request", () => 
   assert.equal(selected?.sku, "SS-001");
   assert.equal(selected?.priority, "high");
 
+  const next = selectNextActionableProduct(actionable);
+  assert.equal(next?.requestId, "req-high");
+  assert.equal(next?.sku, "SS-001");
+
   const summary = summaryWithActionable(actionable, selected?.sku ?? null);
   const keyboard = importPreviewKeyboard(summary.importId, summary);
   assert.equal(keyboard?.inline_keyboard[0]?.[0]?.text, "Generate priority: SS-001 · ~$0.13");
@@ -127,6 +132,10 @@ test("priority shortcut selects the highest-priority actionable request", () => 
     actionable.find((entry) => entry.sku === summary.priorityRequestSku)?.requestId,
     "req-high",
   );
+});
+
+test("selectNextActionableProduct returns null when the campaign has no remaining work", () => {
+  assert.equal(selectNextActionableProduct([]), null);
 });
 
 test("arbitrary actionable SKU can be selected via gen callback", () => {
