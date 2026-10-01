@@ -473,20 +473,46 @@ export const buildSlackCancelledPreviewBlocks = (
   },
 ];
 
-export const buildSlackGenerationStartedFallbackText = (sku: string): string => {
-  const cost = formatOneProductCostLabel();
-  return [
-    `✨ Generating ${sku}`,
-    "",
-    `${CANDIDATES_PER_REQUEST} candidates · ${MVP_ASPECT_RATIO} · ${cost}`,
-    "",
-    "Using the product image as reference. Results will appear here when ready.",
-  ].join("\n");
+export type GenerationStartedMessageParams = {
+  sku: string;
+  shotIdea?: string | null;
 };
 
-export const buildSlackGenerationStartedBlocks = (sku: string): SlackBlock[] => {
+const normalizeShotIdea = (shotIdea: string | null | undefined): string | null => {
+  if (typeof shotIdea !== "string") {
+    return null;
+  }
+  const trimmed = shotIdea.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+export const buildSlackGenerationStartedFallbackText = (
+  params: GenerationStartedMessageParams | string,
+): string => {
+  const { sku, shotIdea } =
+    typeof params === "string" ? { sku: params, shotIdea: null } : params;
+  const idea = normalizeShotIdea(shotIdea);
   const cost = formatOneProductCostLabel();
-  return [
+  const lines = [`✨ Generating ${sku}`, ""];
+  if (idea) {
+    lines.push("Creative direction", idea, "");
+  }
+  lines.push(
+    `${CANDIDATES_PER_REQUEST} lifestyle candidates · ${MVP_ASPECT_RATIO} portrait · ${cost}`,
+    "",
+    "Using the catalog product photo as reference. Results will appear here when ready.",
+  );
+  return lines.join("\n");
+};
+
+export const buildSlackGenerationStartedBlocks = (
+  params: GenerationStartedMessageParams | string,
+): SlackBlock[] => {
+  const { sku, shotIdea } =
+    typeof params === "string" ? { sku: params, shotIdea: null } : params;
+  const idea = normalizeShotIdea(shotIdea);
+  const cost = formatOneProductCostLabel();
+  const blocks: SlackBlock[] = [
     {
       type: "header",
       text: {
@@ -495,11 +521,24 @@ export const buildSlackGenerationStartedBlocks = (sku: string): SlackBlock[] => 
         emoji: true,
       },
     },
+  ];
+
+  if (idea) {
+    blocks.push({
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*Creative direction*\n_${idea}_`,
+      },
+    });
+  }
+
+  blocks.push(
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*${CANDIDATES_PER_REQUEST} candidates* · *${MVP_ASPECT_RATIO}* · *${cost}*`,
+        text: `*${CANDIDATES_PER_REQUEST} lifestyle candidates* · *${MVP_ASPECT_RATIO} portrait* · *${cost}*`,
       },
     },
     {
@@ -507,11 +546,13 @@ export const buildSlackGenerationStartedBlocks = (sku: string): SlackBlock[] => 
       elements: [
         {
           type: "mrkdwn",
-          text: "Using the product image as reference. Results will appear here when ready.",
+          text: "Using the catalog product photo as reference. Results will appear here when ready.",
         },
       ],
     },
-  ];
+  );
+
+  return blocks;
 };
 
 export const buildSlackCandidatesReadyFallbackText = (params: {

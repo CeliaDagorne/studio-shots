@@ -130,7 +130,7 @@ export type SlackActionDeps = {
   ) => Promise<ActionableProductOption[]>;
   getShotRequestById?: (
     shotRequestId: string,
-  ) => Promise<Pick<ShotRequestRow, "id" | "productSku" | "workflowStatus"> | null>;
+  ) => Promise<Pick<ShotRequestRow, "id" | "productSku" | "workflowStatus" | "shotIdea"> | null>;
   getCandidateById?: (candidateId: string) => Promise<GenerationCandidateRow | null>;
   persistCandidateReview?: typeof persistCandidateReview;
   runPriorityGeneration?: typeof runPriorityGeneration;
@@ -375,11 +375,17 @@ export const handleSlackBlockAction = async (
       return { httpBody: ephemeral(selectionErrorMessage("unavailable")) };
     }
 
+    const priorityRequest = await getShotRequest(priorityOption.requestId);
+    const generationMessage = {
+      sku: prioritySku,
+      shotIdea: priorityRequest?.shotIdea ?? null,
+    };
+
     return {
       httpBody: {
         replace_original: true,
-        text: buildSlackGenerationStartedFallbackText(prioritySku),
-        blocks: buildSlackGenerationStartedBlocks(prioritySku),
+        text: buildSlackGenerationStartedFallbackText(generationMessage),
+        blocks: buildSlackGenerationStartedBlocks(generationMessage),
       },
       background: async () => {
         await runPriority({
@@ -423,11 +429,16 @@ export const handleSlackBlockAction = async (
       return { httpBody: ephemeral(selectionErrorMessage("mismatch")) };
     }
 
+    const generationMessage = {
+      sku: evaluation.option.sku,
+      shotIdea: request?.shotIdea ?? null,
+    };
+
     return {
       httpBody: {
         replace_original: true,
-        text: buildSlackGenerationStartedFallbackText(evaluation.option.sku),
-        blocks: buildSlackGenerationStartedBlocks(evaluation.option.sku),
+        text: buildSlackGenerationStartedFallbackText(generationMessage),
+        blocks: buildSlackGenerationStartedBlocks(generationMessage),
       },
       background: async () => {
         await runSelected({

@@ -282,10 +282,12 @@ export const runShotRequestGeneration = async (params: {
       await db.insert(generationCandidates).values(row);
     }
 
-    await notifyConversation(
-      params.conversation,
-      `Generating 3 ${claimedRequest.productSku} candidates with image_ref at ${MVP_ASPECT_RATIO} (~$0.13). I'll send each photo when ready.`,
-    );
+    if (params.conversation.platform !== CHAT_PLATFORM.slack) {
+      await notifyConversation(
+        params.conversation,
+        `Generating 3 ${claimedRequest.productSku} candidates with image_ref at ${MVP_ASPECT_RATIO} (~$0.13). I'll send each photo when ready.`,
+      );
+    }
 
     await Promise.all(
       candidateRows.map((row) =>

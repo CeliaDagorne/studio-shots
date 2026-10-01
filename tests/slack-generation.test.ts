@@ -127,6 +127,10 @@ const baseDeps = () => {
         id: option.requestId,
         productSku: option.sku,
         workflowStatus: "imported_unconfirmed",
+        shotIdea:
+          option.sku === "SS-001"
+            ? "on a travertine pedestal, warm editorial interior"
+            : "evening coffee table, book half-open beside it",
       };
     },
     claimAction: (key: string) => {
@@ -185,19 +189,43 @@ test("import preview omits warnings section when empty and shows them when prese
   assert.match(withWarnings, /Source photo may be underexposed/);
 });
 
-test("generation started Block Kit uses summary line and context", async () => {
+test("generation started Block Kit uses creative direction, summary line, and context", async () => {
   const {
     buildSlackGenerationStartedBlocks,
     buildSlackGenerationStartedFallbackText,
   } = await import("@/lib/slack-blocks");
-  const blocks = buildSlackGenerationStartedBlocks("SS-001");
-  const serialized = JSON.stringify(blocks);
-  assert.match(serialized, /✨ Generating SS-001/);
-  assert.match(serialized, /\*3 candidates\* · \*4:5\* · \*~\$0\.13\*/);
-  assert.match(serialized, /Using the product image as reference/);
-  assert.match(serialized, /Results will appear here when ready/);
-  assert.doesNotMatch(serialized, /Generation mode/);
-  assert.match(buildSlackGenerationStartedFallbackText("SS-001"), /✨ Generating SS-001/);
+  const withIdea = buildSlackGenerationStartedBlocks({
+    sku: "SS-001",
+    shotIdea: "on a travertine pedestal, warm editorial interior",
+  });
+  const withIdeaSerialized = JSON.stringify(withIdea);
+  assert.match(withIdeaSerialized, /✨ Generating SS-001/);
+  assert.match(withIdeaSerialized, /\*Creative direction\*/);
+  assert.match(withIdeaSerialized, /_on a travertine pedestal, warm editorial interior_/);
+  assert.match(
+    withIdeaSerialized,
+    /\*3 lifestyle candidates\* · \*4:5 portrait\* · \*~\$0\.13\*/,
+  );
+  assert.match(withIdeaSerialized, /Using the catalog product photo as reference/);
+  assert.match(withIdeaSerialized, /Results will appear here when ready/);
+  assert.doesNotMatch(withIdeaSerialized, /image_ref/);
+
+  const fallback = buildSlackGenerationStartedFallbackText({
+    sku: "SS-001",
+    shotIdea: "on a travertine pedestal, warm editorial interior",
+  });
+  assert.match(fallback, /Creative direction/);
+  assert.match(fallback, /on a travertine pedestal, warm editorial interior/);
+  assert.match(fallback, /3 lifestyle candidates · 4:5 portrait · ~\$0\.13/);
+  assert.doesNotMatch(fallback, /image_ref/);
+
+  const withoutIdea = JSON.stringify(buildSlackGenerationStartedBlocks({ sku: "SS-002" }));
+  assert.doesNotMatch(withoutIdea, /Creative direction/);
+  assert.match(withoutIdea, /✨ Generating SS-002/);
+  assert.doesNotMatch(
+    buildSlackGenerationStartedFallbackText({ sku: "SS-002", shotIdea: "   " }),
+    /Creative direction/,
+  );
 });
 
 test("candidates ready Block Kit summarizes review guidance", async () => {
@@ -334,8 +362,11 @@ test("priority generation action starts the shared generation path", async () =>
   );
 
   assert.match(result.httpBody.text, /✨ Generating SS-001/);
+  assert.match(result.httpBody.text, /Creative direction/);
+  assert.match(result.httpBody.text, /on a travertine pedestal, warm editorial interior/);
   assert.match(result.httpBody.text, /Results will appear/);
   assert.match(JSON.stringify(result.httpBody.blocks), /✨ Generating SS-001/);
+  assert.match(JSON.stringify(result.httpBody.blocks), /Creative direction/);
   assert.equal(result.httpBody.replace_original, true);
   await result.background!();
   assert.equal(priorityCalls, 1);
@@ -362,7 +393,9 @@ test("manual SKU selection validates request id and sku server-side", async () =
     },
   );
   assert.match(ok.httpBody.text, /✨ Generating SS-002/);
+  assert.match(ok.httpBody.text, /evening coffee table, book half-open beside it/);
   assert.match(JSON.stringify(ok.httpBody.blocks), /✨ Generating SS-002/);
+  assert.match(JSON.stringify(ok.httpBody.blocks), /Creative direction/);
   await ok.background!();
   assert.equal(selectedCalls, 1);
 
@@ -414,6 +447,7 @@ test("duplicate Generate clicks are refused once the request is no longer action
         id: "req-normal",
         productSku: "SS-002",
         workflowStatus: "generating",
+        shotIdea: "evening coffee table, book half-open beside it",
       }),
       runSelectedRequestGeneration: async () => {
         selectedCalls += 1;
