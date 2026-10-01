@@ -98,6 +98,12 @@ const baseDeps = (candidate: GenerationCandidateRow = sampleCandidate()) => {
   const seen = new Set<string>();
   let stored = candidate;
   const responsePosts: SlackInteractionResponse[] = [];
+  const messageUpdates: Array<{
+    channel: string;
+    ts: string;
+    text: string;
+    blocks?: SlackBlock[];
+  }> = [];
   const notifications: Array<{ text: string; blocks?: SlackBlock[] }> = [];
   const deps: SlackActionDeps = {
     getCandidateById: async (id: string) => (id === stored.id ? stored : null),
@@ -165,6 +171,9 @@ const baseDeps = (candidate: GenerationCandidateRow = sampleCandidate()) => {
     postResponseUrl: async (_url, body) => {
       responsePosts.push(body);
     },
+    updateMessage: async (params) => {
+      messageUpdates.push(params);
+    },
     notifyConversation: async (_conversation, text, options) => {
       notifications.push({ text, blocks: options?.blocks as SlackBlock[] | undefined });
     },
@@ -178,6 +187,7 @@ const baseDeps = (candidate: GenerationCandidateRow = sampleCandidate()) => {
       stored = next;
     },
     responsePosts,
+    messageUpdates,
     notifications,
     deps,
   };
@@ -209,8 +219,46 @@ test("finalizeSlackCandidateMessageBlocks strips actions and stamps status", asy
   const serialized = JSON.stringify(finalized);
   assert.doesNotMatch(serialized, /"type":"actions"/);
   assert.doesNotMatch(serialized, /"text":"Approve"/);
-  assert.match(serialized, /Status: Approved/);
+  assert.match(serialized, /Status: Approved|✅ Approved/);
   assert.match(serialized, /blob\.example\/cand-1\.jpg/);
+});
+
+test("review still resolves when response_url 404s by using chat.update", async () => {
+  const { handleSlackBlockAction } = await import("@/lib/slack-actions");
+  const { SLACK_ACTION_IDS } = await import("@/lib/slack-blocks");
+  const ctx = baseDeps();
+  ctx.deps.postResponseUrl = async () => {
+    throw new Error("Slack response_url HTTP 404");
+  };
+  ctx.deps.persistCandidateReview = async () => ({
+    alreadyReviewed: false,
+    candidate: {
+      ...ctx.candidateRef(),
+      reviewDecision: "approved",
+    },
+    existingDecision: "approved",
+    requestStatus: "approved",
+    approvedCount: 2,
+    importId: "import-1",
+    newlyResolved: true,
+  });
+  ctx.deps.loadStillActionableProductsForImport = async () => [];
+
+  const result = await handleSlackBlockAction(
+    blockActionPayload({
+      actionId: SLACK_ACTION_IDS.approve,
+      value: "cand-1",
+      triggerId: "trig-response-url-404",
+    }),
+    ctx.deps,
+  );
+  assert.ok(result.background);
+  await result.background!();
+
+  assert.equal(ctx.messageUpdates.length, 1);
+  assert.doesNotMatch(JSON.stringify(ctx.messageUpdates[0]?.blocks), /"type":"actions"/);
+  assert.equal(ctx.notifications.length, 1);
+  assert.match(ctx.notifications[0]!.text, /✅ SS-001 approved/);
 });
 
 test("approval updates Slack message without buttons before any DB work", async () => {
@@ -251,7 +299,7 @@ test("approval updates Slack message without buttons before any DB work", async 
   );
 
   assert.equal(result.httpBody.replace_original, true);
-  assert.match(result.httpBody.text ?? "", /Status: Approved/);
+  assert.match(result.httpBody.text ?? "", /✅ Approved|Status: Approved/);
   assert.doesNotMatch(JSON.stringify(result.httpBody.blocks), /"text":"Approve"/);
   assert.doesNotMatch(JSON.stringify(result.httpBody.blocks), /"text":"Reject"/);
   assert.doesNotMatch(JSON.stringify(result.httpBody.blocks), /"type":"actions"/);
@@ -269,7 +317,8 @@ test("approval updates Slack message without buttons before any DB work", async 
   await background;
   assert.equal(persistStarted, true);
   assert.equal(ctx.candidateRef().reviewDecision, "approved");
-  assert.ok(ctx.responsePosts.some((post) => post.replace_original === true));
+  assert.ok(ctx.messageUpdates.length > 0);
+  assert.doesNotMatch(JSON.stringify(ctx.messageUpdates[0]?.blocks), /"type":"actions"/);
 });
 
 test("rejection updates Slack message without buttons before persistence finishes", async () => {
@@ -287,7 +336,7 @@ test("rejection updates Slack message without buttons before persistence finishe
   );
 
   assert.equal(result.httpBody.replace_original, true);
-  assert.match(result.httpBody.text ?? "", /Status: Rejected/);
+  assert.match(result.httpBody.text ?? "", /❌ Rejected|Status: Rejected/);
   assert.doesNotMatch(JSON.stringify(result.httpBody.blocks), /"text":"Approve"/);
   assert.doesNotMatch(JSON.stringify(result.httpBody.blocks), /"text":"Reject"/);
   assert.ok(result.background);
@@ -411,14 +460,9 @@ test("conflicting decisions are rejected without changing the stored decision", 
         post.text === SLACK_INTERACTION_MESSAGES.alreadyApproved,
     ),
   );
-  assert.ok(
-    ctx.responsePosts.some(
-      (post) =>
-        post.replace_original === true &&
-        /Approved/.test(post.text) &&
-        !JSON.stringify(post.blocks).includes('"text":"Approve"'),
-    ),
-  );
+  assert.ok(ctx.messageUpdates.length > 0);
+  assert.match(ctx.messageUpdates[0]!.text, /Approved/);
+  assert.doesNotMatch(JSON.stringify(ctx.messageUpdates[0]?.blocks), /"text":"Approve"/);
 });
 
 test("stale or missing candidates return clear errors via response_url", async () => {
@@ -591,9 +635,9 @@ test("request completion offers the next actionable product from live campaign s
   );
 });
 
-test("fully rejected products also continue the campaign with next product actions", async () => {
+test("fully rejected products stay actionable with regenerate CTA for the same SKU", async () => {
   const { handleSlackBlockAction } = await import("@/lib/slack-actions");
-  const { SLACK_ACTION_IDS } = await import("@/lib/slack-blocks");
+  const { SLACK_ACTION_IDS, encodeSlackGenValue } = await import("@/lib/slack-blocks");
   const ctx = baseDeps();
   ctx.deps.persistCandidateReview = async () => ({
     alreadyReviewed: false,
@@ -607,7 +651,9 @@ test("fully rejected products also continue the campaign with next product actio
     importId: "import-1",
     newlyResolved: true,
   });
+  // Unresolved SS-001 remains in the actionable list alongside others.
   ctx.deps.loadStillActionableProductsForImport = async () => [
+    { requestId: "req-1", sku: "SS-001", priority: "high" },
     { requestId: "req-next", sku: "SS-003", priority: "normal" },
   ];
 
@@ -624,10 +670,19 @@ test("fully rejected products also continue the campaign with next product actio
 
   assert.equal(ctx.notifications.length, 1);
   const notification = ctx.notifications[0]!;
-  assert.match(notification.text, /⚠️ SS-001 needs regeneration/);
-  assert.match(notification.text, /SS-003 · normal priority/);
-  assert.match(JSON.stringify(notification.blocks), /Choose another product/);
-  assert.match(JSON.stringify(notification.blocks), /Generate SS-003/);
+  assert.match(notification.text, /🔁 SS-001 still needs a usable image/);
+  assert.match(notification.text, /No candidate reached the approval threshold/);
+  assert.doesNotMatch(notification.text, /Campaign complete/);
+  assert.doesNotMatch(notification.text, /➡️ Next up/);
+  const serialized = JSON.stringify(notification.blocks);
+  assert.match(serialized, /Choose another product/);
+  assert.match(serialized, /Generate new test candidates/);
+  assert.match(serialized, new RegExp(SLACK_ACTION_IDS.retry));
+  assert.match(
+    serialized,
+    new RegExp(encodeSlackGenValue("import-1", "req-1", "SS-001")),
+  );
+  assert.doesNotMatch(serialized, /Generate SS-003/);
 });
 
 test("completed campaigns show campaign complete instead of next product actions", async () => {

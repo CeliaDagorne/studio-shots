@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import { resolvePublicAssetUrl } from "@/lib/assets";
 import { runCandidateImagePipeline } from "@/lib/candidate-pipeline";
@@ -23,7 +23,11 @@ import {
 } from "@/lib/products";
 import {
   CANDIDATE_STATUS,
+  displayCandidateIndexInAttempt,
+  filterLatestGenerationAttempt,
+  generationAttemptId,
   MIN_APPROVALS_TO_COMPLETE,
+  nextGenerationAttemptStartIndex,
   PRIORITY_CANDIDATE_COUNT,
   REVIEW_DECISION,
   WORKFLOW,
@@ -31,7 +35,11 @@ import {
   resolveRequestAfterReviews,
 } from "@/lib/review";
 import { generationCandidates, imports, products, shotRequests } from "@/lib/schema";
-import { buildSlackCandidatesReadyBlocks } from "@/lib/slack-blocks";
+import {
+  buildSlackCandidatesReadyBlocks,
+  buildSlackDeliveryFailedBlocks,
+  buildSlackGenerationFailedBlocks,
+} from "@/lib/slack-blocks";
 import {
   editMessageCaption,
   removeInlineKeyboard,
@@ -39,6 +47,12 @@ import {
 } from "@/lib/telegram";
 
 const now = () => new Date();
+
+const CLAIMABLE_WORKFLOW_STATUSES = [
+  WORKFLOW.importedUnconfirmed,
+  WORKFLOW.failed,
+  WORKFLOW.needsRegeneration,
+] as const;
 
 const hashToUuid = (hex: string): string =>
   [
@@ -54,6 +68,10 @@ export const stableCandidateId = (shotRequestId: string, index: number): string 
     createHash("sha256").update(`candidate:${shotRequestId}:${index}`).digest("hex"),
   );
 
+/**
+ * Atomically claim a request for generation/retry/regenerate.
+ * Only one concurrent claim succeeds — duplicate Retry clicks are idempotent.
+ */
 export const claimShotRequestForGeneration = async (shotRequestId: string) => {
   const db = getDb();
   const claimed = await db
@@ -65,7 +83,7 @@ export const claimShotRequestForGeneration = async (shotRequestId: string) => {
     .where(
       and(
         eq(shotRequests.id, shotRequestId),
-        eq(shotRequests.workflowStatus, WORKFLOW.importedUnconfirmed),
+        inArray(shotRequests.workflowStatus, [...CLAIMABLE_WORKFLOW_STATUSES]),
       ),
     )
     .returning();
@@ -94,7 +112,7 @@ export const findActionablePriorityRequest = async (importId: string) => {
       .where(
         and(
           eq(shotRequests.id, priorityOption.requestId),
-          eq(shotRequests.workflowStatus, WORKFLOW.importedUnconfirmed),
+          inArray(shotRequests.workflowStatus, [...CLAIMABLE_WORKFLOW_STATUSES]),
         ),
       )
       .limit(1);
@@ -109,7 +127,7 @@ export const findActionablePriorityRequest = async (importId: string) => {
     .where(
       and(
         eq(shotRequests.productSku, importRecord.priorityRequestSku),
-        eq(shotRequests.workflowStatus, WORKFLOW.importedUnconfirmed),
+        inArray(shotRequests.workflowStatus, [...CLAIMABLE_WORKFLOW_STATUSES]),
       ),
     )
     .orderBy(asc(shotRequests.createdAt))
@@ -224,6 +242,248 @@ const processOneCandidate = async (params: {
   return "failed";
 };
 
+/**
+ * Re-poll stored external generation IDs so a timeout cannot spawn duplicate paid work.
+ * Recovers candidates in place when Luma (or fake) reports completed.
+ */
+export const reconcileExternalGenerationIds = async (params: {
+  candidates: Array<{
+    id: string;
+    productSku: string;
+    status: string;
+    lumaGenerationId: string | null;
+    blobUrl: string | null;
+  }>;
+}): Promise<number> => {
+  const db = getDb();
+  const provider = getImageGenerationProvider();
+  let recovered = 0;
+
+  for (const candidate of params.candidates) {
+    if (
+      !candidate.lumaGenerationId ||
+      candidate.status === CANDIDATE_STATUS.ready ||
+      candidate.blobUrl
+    ) {
+      continue;
+    }
+
+    try {
+      const finished = await provider.pollUntilDone(candidate.lumaGenerationId);
+      if (finished.state !== "completed" || !finished.outputUrl) {
+        await db
+          .update(generationCandidates)
+          .set({
+            lumaState: finished.state,
+            status: CANDIDATE_STATUS.failed,
+            errorMessage: finished.failureReason ?? "Image generation failed",
+            updatedAt: now(),
+          })
+          .where(eq(generationCandidates.id, candidate.id));
+        continue;
+      }
+
+      const stored = await provider.storeCandidateImage({
+        sourceUrl: finished.outputUrl,
+        sku: candidate.productSku,
+        candidateId: candidate.id,
+      });
+
+      await db
+        .update(generationCandidates)
+        .set({
+          lumaState: finished.state,
+          status: CANDIDATE_STATUS.ready,
+          blobPath: stored.blobPath,
+          blobUrl: stored.blobUrl,
+          errorMessage: null,
+          updatedAt: now(),
+        })
+        .where(eq(generationCandidates.id, candidate.id));
+      recovered += 1;
+    } catch (error) {
+      console.error(
+        "[generation/reconcile]",
+        candidate.id,
+        error instanceof Error ? error.message : "reconcile failed",
+      );
+    }
+  }
+
+  return recovered;
+};
+
+const deliverReadyCandidates = async (params: {
+  conversation: ChatConversation;
+  candidates: Array<{
+    id: string;
+    productSku: string;
+    candidateIndex: number;
+    blobUrl: string | null;
+    externalMessageId: string | null;
+  }>;
+  /** When true, only candidates missing an external message id are posted. */
+  onlyUndelivered?: boolean;
+}): Promise<{ delivered: number; failed: number }> => {
+  const db = getDb();
+  let delivered = 0;
+  let failed = 0;
+
+  for (const candidate of params.candidates) {
+    if (!candidate.blobUrl) continue;
+    if (params.onlyUndelivered && candidate.externalMessageId) continue;
+
+    const displayIndex = displayCandidateIndexInAttempt(candidate.candidateIndex);
+    try {
+      const result = await deliverCandidateImage({
+        conversation: params.conversation,
+        blobUrl: candidate.blobUrl,
+        caption: candidateCaption({
+          sku: candidate.productSku,
+          index: displayIndex,
+          total: PRIORITY_CANDIDATE_COUNT,
+        }),
+        candidateId: candidate.id,
+        sku: candidate.productSku,
+        candidateIndex: displayIndex,
+      });
+      if (result.externalMessageId) {
+        await db
+          .update(generationCandidates)
+          .set({
+            externalMessageId: result.externalMessageId,
+            updatedAt: now(),
+          })
+          .where(eq(generationCandidates.id, candidate.id));
+        delivered += 1;
+      } else {
+        failed += 1;
+        if (result.deliveryError) {
+          console.error(
+            "[generation/slack-delivery]",
+            candidate.id,
+            result.deliveryError,
+          );
+        }
+      }
+    } catch (error) {
+      failed += 1;
+      console.error(
+        "[generation/slack-delivery]",
+        candidate.id,
+        error instanceof Error ? error.message : "delivery failed",
+      );
+    }
+  }
+
+  return { delivered, failed };
+};
+
+const notifyGenerationFailed = async (params: {
+  conversation: ChatConversation;
+  sku: string;
+  requestId: string;
+  importId: string | null;
+  detail?: string;
+}) => {
+  if (params.conversation.platform === CHAT_PLATFORM.slack && params.importId) {
+    const campaignPageUrl = buildCampaignPageUrl(env.appUrl, params.importId);
+    const built = buildSlackGenerationFailedBlocks({
+      sku: params.sku,
+      importId: params.importId,
+      requestId: params.requestId,
+      campaignPageUrl,
+      testMode: isFakeImageGenerationProvider(),
+    });
+    await notifyConversation(params.conversation, built.text, { blocks: built.blocks });
+    return;
+  }
+
+  await notifyConversation(
+    params.conversation,
+    `⚠️ Generation failed for ${params.sku}${params.detail ? `: ${params.detail}` : ""}`,
+  );
+};
+
+const notifyDeliveryFailed = async (params: {
+  conversation: ChatConversation;
+  sku: string;
+  requestId: string;
+  importId: string | null;
+  readyCount: number;
+}) => {
+  if (params.conversation.platform === CHAT_PLATFORM.slack && params.importId) {
+    const campaignPageUrl = buildCampaignPageUrl(env.appUrl, params.importId);
+    const built = buildSlackDeliveryFailedBlocks({
+      sku: params.sku,
+      importId: params.importId,
+      requestId: params.requestId,
+      readyCount: params.readyCount,
+      campaignPageUrl,
+      testMode: isFakeImageGenerationProvider(),
+    });
+    await notifyConversation(params.conversation, built.text, { blocks: built.blocks });
+    return;
+  }
+
+  await notifyConversation(
+    params.conversation,
+    `Could not deliver review controls for ${params.sku}. ${params.readyCount} candidate(s) are ready — ask to resend without regenerating.`,
+  );
+};
+
+/**
+ * Re-deliver ready candidates that lack Slack/Telegram message ids.
+ * Never creates a new generation or charges Luma.
+ */
+export const redeliverReadyCandidates = async (params: {
+  shotRequestId: string;
+  conversation: ChatConversation;
+}): Promise<{ ok: boolean; delivered: number; reason?: string }> => {
+  const db = getDb();
+  const request = await getShotRequestById(params.shotRequestId);
+  if (!request) {
+    return { ok: false, delivered: 0, reason: "missing_request" };
+  }
+
+  const all = await db
+    .select()
+    .from(generationCandidates)
+    .where(eq(generationCandidates.shotRequestId, params.shotRequestId))
+    .orderBy(asc(generationCandidates.candidateIndex));
+
+  const latest = filterLatestGenerationAttempt(all);
+  const ready = latest.filter(
+    (candidate) => candidate.status === CANDIDATE_STATUS.ready && candidate.blobUrl,
+  );
+
+  if (ready.length === 0) {
+    return { ok: false, delivered: 0, reason: "no_ready_candidates" };
+  }
+
+  const result = await deliverReadyCandidates({
+    conversation: params.conversation,
+    candidates: ready,
+    onlyUndelivered: true,
+  });
+
+  if (request.workflowStatus !== WORKFLOW.awaitingReview) {
+    await markRequestStatus(params.shotRequestId, WORKFLOW.awaitingReview);
+  }
+
+  if (result.failed > 0 && result.delivered === 0) {
+    await notifyDeliveryFailed({
+      conversation: params.conversation,
+      sku: request.productSku,
+      requestId: request.id,
+      importId: request.importId,
+      readyCount: ready.length,
+    });
+  }
+
+  return { ok: true, delivered: result.delivered };
+};
+
 export const runShotRequestGeneration = async (params: {
   shotRequestId: string;
   conversation: ChatConversation;
@@ -258,8 +518,64 @@ export const runShotRequestGeneration = async (params: {
       shotIdea: claimedRequest.shotIdea,
     });
 
+    const existing = await db
+      .select()
+      .from(generationCandidates)
+      .where(eq(generationCandidates.shotRequestId, shotRequestId))
+      .orderBy(asc(generationCandidates.candidateIndex));
+
+    const latest = filterLatestGenerationAttempt(existing);
+    const latestReady = latest.filter((c) => c.status === CANDIDATE_STATUS.ready);
+    const latestFullyReviewed =
+      latestReady.length > 0 && latestReady.every((c) => Boolean(c.reviewDecision));
+
+    // Uncertain prior failure: reconcile stored external IDs before paying again.
+    if (!latestFullyReviewed && latest.some((c) => c.lumaGenerationId)) {
+      await reconcileExternalGenerationIds({ candidates: latest });
+      const afterReconcile = filterLatestGenerationAttempt(
+        await db
+          .select()
+          .from(generationCandidates)
+          .where(eq(generationCandidates.shotRequestId, shotRequestId))
+          .orderBy(asc(generationCandidates.candidateIndex)),
+      );
+      const recoveredReady = afterReconcile.filter(
+        (c) => c.status === CANDIDATE_STATUS.ready && c.blobUrl,
+      );
+      if (recoveredReady.length > 0) {
+        const delivery = await deliverReadyCandidates({
+          conversation: params.conversation,
+          candidates: recoveredReady,
+        });
+        await markRequestStatus(shotRequestId, WORKFLOW.awaitingReview);
+        if (delivery.failed > 0) {
+          await notifyDeliveryFailed({
+            conversation: params.conversation,
+            sku: claimedRequest.productSku,
+            requestId: shotRequestId,
+            importId: claimedRequest.importId,
+            readyCount: recoveredReady.length,
+          });
+        } else if (params.conversation.platform === CHAT_PLATFORM.slack) {
+          const readyMessage = buildSlackCandidatesReadyBlocks({
+            sku: claimedRequest.productSku,
+            candidateCount: recoveredReady.length,
+            approvalThreshold: MIN_APPROVALS_TO_COMPLETE,
+            testMode: isFakeImageGenerationProvider(),
+          });
+          await notifyConversation(params.conversation, readyMessage.text, {
+            blocks: readyMessage.blocks,
+          });
+        }
+        return { claimed: true };
+      }
+    }
+
+    const startIndex = nextGenerationAttemptStartIndex(existing);
+    const attemptLabel = generationAttemptId(startIndex);
+
     const candidateRows = Array.from({ length: PRIORITY_CANDIDATE_COUNT }, (_, index) => {
-      const candidateIndex = index + 1;
+      const candidateIndex = startIndex + index;
       return {
         id: stableCandidateId(shotRequestId, candidateIndex),
         shotRequestId,
@@ -271,6 +587,13 @@ export const runShotRequestGeneration = async (params: {
         conversationId: params.conversation.conversationId,
       };
     });
+
+    console.info(
+      "[generation/attempt]",
+      shotRequestId,
+      attemptLabel,
+      `indices ${startIndex}-${startIndex + PRIORITY_CANDIDATE_COUNT - 1}`,
+    );
 
     for (const row of candidateRows) {
       await db.insert(generationCandidates).values(row);
@@ -295,67 +618,58 @@ export const runShotRequestGeneration = async (params: {
       ),
     );
 
-    const readyCandidates = await db
+    const attemptCandidates = await db
       .select()
       .from(generationCandidates)
-      .where(eq(generationCandidates.shotRequestId, shotRequestId))
+      .where(
+        and(
+          eq(generationCandidates.shotRequestId, shotRequestId),
+          inArray(
+            generationCandidates.candidateIndex,
+            candidateRows.map((row) => row.candidateIndex),
+          ),
+        ),
+      )
       .orderBy(asc(generationCandidates.candidateIndex));
 
-    const ready = readyCandidates.filter((candidate) => candidate.status === CANDIDATE_STATUS.ready);
-    const failed = readyCandidates.filter((candidate) => candidate.status === CANDIDATE_STATUS.failed);
-
-    for (const candidate of ready) {
-      if (!candidate.blobUrl) continue;
-      try {
-        const delivered = await deliverCandidateImage({
-          conversation: params.conversation,
-          blobUrl: candidate.blobUrl,
-          caption: candidateCaption({
-            sku: candidate.productSku,
-            index: candidate.candidateIndex,
-            total: PRIORITY_CANDIDATE_COUNT,
-          }),
-          candidateId: candidate.id,
-          sku: candidate.productSku,
-          candidateIndex: candidate.candidateIndex,
-        });
-        if (delivered.externalMessageId) {
-          await db
-            .update(generationCandidates)
-            .set({
-              externalMessageId: delivered.externalMessageId,
-              updatedAt: now(),
-            })
-            .where(eq(generationCandidates.id, candidate.id));
-        } else if (delivered.deliveryError) {
-          console.error(
-            "[generation/slack-delivery]",
-            candidate.id,
-            delivered.deliveryError,
-          );
-        }
-      } catch (error) {
-        // Candidate rows stay ready in DB even when Slack presentation fails.
-        console.error(
-          "[generation/slack-delivery]",
-          candidate.id,
-          error instanceof Error ? error.message : "delivery failed",
-        );
-      }
-    }
+    const ready = attemptCandidates.filter(
+      (candidate) => candidate.status === CANDIDATE_STATUS.ready,
+    );
+    const failed = attemptCandidates.filter(
+      (candidate) => candidate.status === CANDIDATE_STATUS.failed,
+    );
 
     if (ready.length === 0) {
       await markRequestStatus(shotRequestId, WORKFLOW.failed);
-      await notifyConversation(
-        params.conversation,
-        `Generation failed for ${claimedRequest.productSku}: all ${PRIORITY_CANDIDATE_COUNT} candidates failed.${
-          failed[0]?.errorMessage ? ` First error: ${failed[0].errorMessage}` : ""
-        }`,
-      );
+      await notifyGenerationFailed({
+        conversation: params.conversation,
+        sku: claimedRequest.productSku,
+        requestId: shotRequestId,
+        importId: claimedRequest.importId,
+        detail: failed[0]?.errorMessage
+          ? `all ${PRIORITY_CANDIDATE_COUNT} candidates failed. First error: ${failed[0].errorMessage}`
+          : `all ${PRIORITY_CANDIDATE_COUNT} candidates failed.`,
+      });
       return { claimed: true };
     }
 
+    const delivery = await deliverReadyCandidates({
+      conversation: params.conversation,
+      candidates: ready,
+    });
+
     await markRequestStatus(shotRequestId, WORKFLOW.awaitingReview);
+
+    if (delivery.failed > 0) {
+      await notifyDeliveryFailed({
+        conversation: params.conversation,
+        sku: claimedRequest.productSku,
+        requestId: shotRequestId,
+        importId: claimedRequest.importId,
+        readyCount: ready.length,
+      });
+      return { claimed: true };
+    }
 
     try {
       if (failed.length > 0) {
@@ -403,22 +717,24 @@ export const runShotRequestGeneration = async (params: {
         );
       if (readyCount.length > 0) {
         await markRequestStatus(shotRequestId, WORKFLOW.awaitingReview);
-        try {
-          await notifyConversation(
-            params.conversation,
-            `${label}: ${readyCount.length} candidate(s) are ready for review. (Slack rich message delivery failed; generation itself succeeded.)`,
-          );
-        } catch {
-          // ignore secondary notify failure
-        }
+        await notifyDeliveryFailed({
+          conversation: params.conversation,
+          sku: claimedRequest.productSku,
+          requestId: shotRequestId,
+          importId: claimedRequest.importId,
+          readyCount: readyCount.length,
+        });
         return { claimed: true };
       }
     }
     await ensureRequestLeavesGenerating(shotRequestId, WORKFLOW.failed);
-    await notifyConversation(
-      params.conversation,
-      `Generation crashed for ${label} (request ${shotRequestId}): ${message}`,
-    );
+    await notifyGenerationFailed({
+      conversation: params.conversation,
+      sku: label,
+      requestId: shotRequestId,
+      importId: claimedRequest.importId,
+      detail: message,
+    });
     return { claimed: true };
   }
 };

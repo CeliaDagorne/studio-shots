@@ -684,25 +684,43 @@ test("choose action opens a paginated product picker", async () => {
   assert.match(JSON.stringify(delivered.blocks), /SS-002 · normal/);
 });
 
-test("interactions route verifies signatures and parses form-encoded payloads", async () => {
-  const { POST } = await import("@/app/api/slack/interactions/route");
+test("interactions route verifies signatures and acknowledges without awaiting handler", async () => {
+  const { POST, slackInteractionsRouteDeps } = await import(
+    "@/app/api/slack/interactions/route"
+  );
   const { SLACK_ACTION_IDS } = await import("@/lib/slack-blocks");
 
-  // Route uses real deps; unauthorized cancel with missing import should still verify signature path.
-  // Use an ephemeral unauthorized team through signed body to avoid DB.
-  const unauthorized = interactionRequest(
-    blockActionPayload({
-      actionId: SLACK_ACTION_IDS.cancel,
-      value: "import-aaa",
-      triggerId: `trig-route-${Date.now()}`,
-      teamId: "T_OTHER",
-    }),
-  );
-  const response = await POST(unauthorized);
-  assert.equal(response.status, 200);
-  const json = (await response.json()) as { text?: string; response_type?: string };
-  assert.match(json.text ?? "", /workspace/i);
-  assert.equal(json.response_type, "ephemeral");
+  const previousSchedule = slackInteractionsRouteDeps.scheduleBackground;
+  const previousExecute = slackInteractionsRouteDeps.executeSlackBlockAction;
+  let executed = false;
+  slackInteractionsRouteDeps.scheduleBackground = (work) => {
+    void work.then(() => {
+      executed = true;
+    });
+  };
+  slackInteractionsRouteDeps.executeSlackBlockAction = async () => {
+    executed = true;
+  };
+
+  try {
+    const unauthorized = interactionRequest(
+      blockActionPayload({
+        actionId: SLACK_ACTION_IDS.cancel,
+        value: "import-aaa",
+        triggerId: `trig-route-${Date.now()}`,
+        teamId: "T_OTHER",
+      }),
+    );
+    const response = await POST(unauthorized);
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), "");
+    // Allow the scheduled microtask to run.
+    await Promise.resolve();
+    assert.equal(executed, true);
+  } finally {
+    slackInteractionsRouteDeps.scheduleBackground = previousSchedule;
+    slackInteractionsRouteDeps.executeSlackBlockAction = previousExecute;
+  }
 
   const bad = await POST(
     new Request("https://studio-shots.example/api/slack/interactions", {

@@ -138,6 +138,58 @@ test("selectNextActionableProduct returns null when the campaign has no remainin
   assert.equal(selectNextActionableProduct([]), null);
 });
 
+test("failed and needs_regeneration requests remain in the actionable picker", () => {
+  const actionable = [
+    option("req-1", "SS-001", "high"),
+    option("req-2", "SS-002", "normal"),
+    option("req-3", "SS-003", "low"),
+  ];
+  const live = new Map([
+    [
+      "req-1",
+      { id: "req-1", productSku: "SS-001", workflowStatus: WORKFLOW.failed },
+    ],
+    [
+      "req-2",
+      { id: "req-2", productSku: "SS-002", workflowStatus: WORKFLOW.needsRegeneration },
+    ],
+    [
+      "req-3",
+      { id: "req-3", productSku: "SS-003", workflowStatus: WORKFLOW.approved },
+    ],
+  ]);
+
+  const filtered = filterActionableOptionsByStatus(actionable, live);
+  assert.deepEqual(
+    filtered.map((entry) => entry.sku),
+    ["SS-001", "SS-002"],
+  );
+
+  const next = selectNextActionableProduct(filtered);
+  assert.equal(next?.sku, "SS-001");
+
+  const failedEval = evaluateProductSelection({
+    actionable,
+    requestId: "req-1",
+    request: live.get("req-1")!,
+  });
+  assert.equal(failedEval.ok, true);
+
+  const regenEval = evaluateProductSelection({
+    actionable,
+    requestId: "req-2",
+    request: live.get("req-2")!,
+  });
+  assert.equal(regenEval.ok, true);
+
+  const approvedEval = evaluateProductSelection({
+    actionable,
+    requestId: "req-3",
+    request: live.get("req-3")!,
+  });
+  assert.deepEqual(approvedEval, { ok: false, reason: "unavailable" });
+});
+
 test("arbitrary actionable SKU can be selected via gen callback", () => {
   const actionable = [
     option("req-1", "SS-001", "high"),

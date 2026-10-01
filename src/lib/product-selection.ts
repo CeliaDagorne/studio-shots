@@ -1,7 +1,9 @@
 import type { ActionableProductOption } from "@/types";
 
-import { selectHighestPrioritySku } from "@/lib/request-planning";
-import { WORKFLOW } from "@/lib/review";
+import {
+  isActionableWorkflowStatus,
+  selectHighestPrioritySku,
+} from "@/lib/request-planning";
 
 export type ShotRequestSelectionSnapshot = {
   id: string;
@@ -14,8 +16,8 @@ export type ProductSelectionResult =
   | { ok: false; reason: "not_in_import" | "unavailable" | "mismatch" };
 
 /**
- * Keep picker options that are still `imported_unconfirmed` in live DB state.
- * Non-actionable products must not remain selectable.
+ * Keep picker options that are still actionable in live DB state
+ * (`imported_unconfirmed`, `failed`, or `needs_regeneration`).
  */
 export const filterActionableOptionsByStatus = (
   options: ActionableProductOption[],
@@ -26,7 +28,7 @@ export const filterActionableOptionsByStatus = (
     return Boolean(
       request &&
         request.productSku === option.sku &&
-        request.workflowStatus === WORKFLOW.importedUnconfirmed,
+        isActionableWorkflowStatus(request.workflowStatus),
     );
   });
 
@@ -48,8 +50,8 @@ export const selectNextActionableProduct = (
 };
 
 /**
- * Validate a gen callback against the import's actionable list and
- * the live shot-request row.
+ * Validate a gen/retry/regenerate callback against the import's actionable list
+ * and the live shot-request row.
  */
 export const evaluateProductSelection = (params: {
   actionable: ActionableProductOption[];
@@ -61,10 +63,7 @@ export const evaluateProductSelection = (params: {
     return { ok: false, reason: "not_in_import" };
   }
 
-  if (
-    !params.request ||
-    params.request.workflowStatus !== WORKFLOW.importedUnconfirmed
-  ) {
+  if (!params.request || !isActionableWorkflowStatus(params.request.workflowStatus)) {
     return { ok: false, reason: "unavailable" };
   }
 

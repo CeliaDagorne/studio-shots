@@ -12,8 +12,15 @@ export const IMAGE_REF_COST_USD_MICROS = 43_400;
 export const MVP_ASPECT_RATIO = "4:5";
 export const CANDIDATES_PER_REQUEST = 3;
 
-/** Workflow statuses that still need generation (not yet claimed, reviewed, or closed). */
-export const ACTIONABLE_WORKFLOW_STATUSES = new Set(["imported_unconfirmed"]);
+/**
+ * Workflow statuses that still need generation or regeneration.
+ * Approved (and in-flight generating / awaiting_review) are not selectable.
+ */
+export const ACTIONABLE_WORKFLOW_STATUSES = new Set([
+  "imported_unconfirmed",
+  "failed",
+  "needs_regeneration",
+]);
 
 export const CATALOG_PRIORITY_RANK: Record<CatalogPriority, number> = {
   high: 3,

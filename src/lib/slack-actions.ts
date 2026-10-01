@@ -5,6 +5,7 @@ import {
   getCandidateById,
   getShotRequestById,
   persistCandidateReview,
+  redeliverReadyCandidates,
   runPriorityGeneration,
   runSelectedRequestGeneration,
 } from "@/lib/generation";
@@ -24,9 +25,9 @@ import {
   selectNextActionableProduct,
   selectionErrorMessage,
 } from "@/lib/product-selection";
-import { CANDIDATE_STATUS, PRIORITY_CANDIDATE_COUNT, REVIEW_DECISION, WORKFLOW } from "@/lib/review";
+import { CANDIDATE_STATUS, PRIORITY_CANDIDATE_COUNT, REVIEW_DECISION, WORKFLOW, displayCandidateIndexInAttempt } from "@/lib/review";
 import type { GenerationCandidateRow, ImportRow, ShotRequestRow } from "@/lib/schema";
-import { isAllowedSlackChannel, isAllowedSlackTeam } from "@/lib/slack";
+import { isAllowedSlackChannel, isAllowedSlackTeam, updateSlackMessage } from "@/lib/slack";
 import {
   buildSlackCancelledPreviewBlocks,
   buildSlackCandidateBlocks,
@@ -57,6 +58,8 @@ const postSlackResponseUrl = async (
     cache: "no-store",
   });
   if (!response.ok) {
+    // response_url often 404s after the interaction HTTP ack — callers should
+    // fall back to chat.update rather than aborting review persistence.
     throw new Error(`Slack response_url HTTP ${response.status}`);
   }
 };
@@ -65,7 +68,7 @@ const reviewedMessageResponse = (
   decision: "approved" | "rejected",
   sourceBlocks: SlackBlock[] | undefined,
 ): SlackInteractionResponse => {
-  const text = decision === "approved" ? "Status: Approved" : "Status: Rejected";
+  const text = decision === "approved" ? "✅ Approved" : "❌ Rejected";
   if (sourceBlocks && sourceBlocks.length > 0) {
     return {
       replace_original: true,
@@ -81,7 +84,7 @@ const reviewedMessageResponse = (
         type: "section",
         text: {
           type: "mrkdwn",
-          text: decision === "approved" ? "*Status: Approved*" : "*Status: Rejected*",
+          text: decision === "approved" ? "*✅ Approved*" : "*❌ Rejected*",
         },
       },
     ],
@@ -136,10 +139,12 @@ export type SlackActionDeps = {
   persistCandidateReview?: typeof persistCandidateReview;
   runPriorityGeneration?: typeof runPriorityGeneration;
   runSelectedRequestGeneration?: typeof runSelectedRequestGeneration;
+  redeliverReadyCandidates?: typeof redeliverReadyCandidates;
   notifyConversation?: typeof notifyConversation;
   claimAction?: typeof claimSlackEventId;
   releaseAction?: typeof releaseSlackEventId;
   postResponseUrl?: typeof postSlackResponseUrl;
+  updateMessage?: typeof updateSlackMessage;
   appUrl?: string;
   isAllowedTeam?: (teamId: string) => boolean;
   isAllowedChannel?: (channelId: string) => boolean;
@@ -162,6 +167,7 @@ export const SLACK_INTERACTION_MESSAGES = {
   alreadyRejected: "This candidate was already rejected.",
   conflictingDecision: "This candidate already has a different review decision.",
   reviewInProgress: "That review is already being recorded.",
+  processingFailed: "Something went wrong recording that action. Please try again.",
 } as const;
 
 /** Extract the JSON `payload` field from Slack's form-encoded interaction body. */
@@ -200,14 +206,35 @@ export const handleSlackBlockAction = async (
   const persistReview = deps.persistCandidateReview ?? persistCandidateReview;
   const runPriority = deps.runPriorityGeneration ?? runPriorityGeneration;
   const runSelected = deps.runSelectedRequestGeneration ?? runSelectedRequestGeneration;
+  const redeliver = deps.redeliverReadyCandidates ?? redeliverReadyCandidates;
   const notify = deps.notifyConversation ?? notifyConversation;
   const claimAction = deps.claimAction ?? claimSlackEventId;
   const releaseAction = deps.releaseAction ?? releaseSlackEventId;
   const postResponseUrl = deps.postResponseUrl ?? postSlackResponseUrl;
+  const updateMessage = deps.updateMessage ?? updateSlackMessage;
   const appUrl = deps.appUrl ?? env.appUrl;
   const allowTeam = deps.isAllowedTeam ?? isAllowedSlackTeam;
   const allowChannel = deps.isAllowedChannel ?? isAllowedSlackChannel;
   const isFakeGeneration = deps.isFakeGeneration ?? isFakeImageGenerationProvider;
+
+  const postResponseUrlBestEffort = async (
+    responseUrl: string | undefined,
+    body: SlackInteractionResponse,
+  ): Promise<boolean> => {
+    if (!responseUrl) {
+      return false;
+    }
+    try {
+      await postResponseUrl(responseUrl, body);
+      return true;
+    } catch (error) {
+      console.error(
+        "[slack/response_url]",
+        error instanceof Error ? error.message : "response_url failed",
+      );
+      return false;
+    }
+  };
 
   const teamId = payload.team?.id;
   const channelId = payload.channel?.id;
@@ -403,7 +430,10 @@ export const handleSlackBlockAction = async (
     };
   }
 
-  if (action.action_id === SLACK_ACTION_IDS.gen) {
+  if (
+    action.action_id === SLACK_ACTION_IDS.gen ||
+    action.action_id === SLACK_ACTION_IDS.retry
+  ) {
     const parsed = parseSlackGenValue(action.value);
     if (!parsed) {
       return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.unknownAction) };
@@ -457,6 +487,44 @@ export const handleSlackBlockAction = async (
     };
   }
 
+  if (action.action_id === SLACK_ACTION_IDS.resend) {
+    const parsed = parseSlackGenValue(action.value);
+    if (!parsed) {
+      return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.unknownAction) };
+    }
+
+    const loaded = await loadAuthorizedImport(parsed.importId);
+    if (!loaded.ok) {
+      return { httpBody: ephemeral(loaded.message) };
+    }
+
+    const request = await getShotRequest(parsed.requestId);
+    if (!request || request.productSku !== parsed.sku) {
+      return { httpBody: ephemeral(selectionErrorMessage("mismatch")) };
+    }
+
+    return {
+      httpBody: {
+        replace_original: true,
+        text: `Resending review messages for ${parsed.sku}…`,
+      },
+      background: async () => {
+        const result = await redeliver({
+          shotRequestId: parsed.requestId,
+          conversation,
+        });
+        if (!result.ok) {
+          await notify(
+            conversation,
+            result.reason === "no_ready_candidates"
+              ? `${parsed.sku}: no ready candidates to resend. Use Retry to generate again.`
+              : `${parsed.sku}: could not resend review messages.`,
+          );
+        }
+      },
+    };
+  }
+
   if (
     action.action_id === SLACK_ACTION_IDS.approve ||
     action.action_id === SLACK_ACTION_IDS.reject
@@ -477,6 +545,7 @@ export const handleSlackBlockAction = async (
       : undefined;
     const httpBody = reviewedMessageResponse(decision, sourceBlocks);
     const responseUrl = payload.response_url;
+    const messageTs = payload.message?.ts;
 
     return {
       httpBody,
@@ -485,30 +554,52 @@ export const handleSlackBlockAction = async (
           const candidate = await getCandidate(candidateId);
 
           const postEphemeral = async (text: string) => {
-            if (!responseUrl) return;
-            await postResponseUrl(responseUrl, ephemeral(text));
+            await postResponseUrlBestEffort(responseUrl, ephemeral(text));
           };
 
-          const postCandidateMessage = async (
+          const publishCandidateStatus = async (
             row: GenerationCandidateRow,
             reviewDecision: string,
           ) => {
-            if (!responseUrl || !row.blobUrl) return;
+            if (!row.blobUrl) return;
+            const displayIndex = displayCandidateIndexInAttempt(row.candidateIndex);
             const built = buildSlackCandidateBlocks({
               caption: "",
               blobUrl: row.blobUrl,
               candidateId: row.id,
               sku: row.productSku,
-              candidateIndex: row.candidateIndex,
+              candidateIndex: displayIndex,
               total: PRIORITY_CANDIDATE_COUNT,
               reviewDecision,
               testMode: isFakeGeneration(),
             });
-            await postResponseUrl(responseUrl, {
+            const replacement: SlackInteractionResponse = {
               replace_original: true,
               text: built.text,
               blocks: built.blocks,
-            });
+            };
+
+            // Prefer chat.update — response_url frequently 404s after the HTTP ack
+            // (especially behind local tunnels), which previously aborted resolution.
+            const ts = messageTs || row.externalMessageId;
+            if (ts) {
+              try {
+                await updateMessage({
+                  channel: channelId,
+                  ts,
+                  text: built.text,
+                  blocks: built.blocks,
+                });
+                return;
+              } catch (error) {
+                console.error(
+                  "[slack/review]",
+                  error instanceof Error ? error.message : "chat.update failed",
+                );
+              }
+            }
+
+            await postResponseUrlBestEffort(responseUrl, replacement);
           };
 
           if (!candidate) {
@@ -528,7 +619,6 @@ export const handleSlackBlockAction = async (
             return;
           }
 
-          const messageTs = payload.message?.ts;
           if (
             candidate.externalMessageId &&
             messageTs &&
@@ -539,7 +629,7 @@ export const handleSlackBlockAction = async (
           }
 
           if (candidate.reviewDecision) {
-            await postCandidateMessage(candidate, candidate.reviewDecision);
+            await publishCandidateStatus(candidate, candidate.reviewDecision);
             if (candidate.reviewDecision !== decision) {
               await postEphemeral(
                 candidate.reviewDecision === REVIEW_DECISION.approved
@@ -566,7 +656,7 @@ export const handleSlackBlockAction = async (
               "[slack/review]",
               `candidate ${candidate.id} already ${persisted.existingDecision}; ignored ${decision}`,
             );
-            await postCandidateMessage(candidate, persisted.existingDecision);
+            await publishCandidateStatus(candidate, persisted.existingDecision);
             await postEphemeral(
               persisted.existingDecision === REVIEW_DECISION.approved
                 ? SLACK_INTERACTION_MESSAGES.alreadyApproved
@@ -577,11 +667,8 @@ export const handleSlackBlockAction = async (
             return;
           }
 
-          // Re-post via response_url so buttons stay gone even if Slack ignored
-          // the HTTP replace_original acknowledgement.
-          const finalDecision =
-            persisted.existingDecision ?? decision;
-          await postCandidateMessage(
+          const finalDecision = persisted.existingDecision ?? decision;
+          await publishCandidateStatus(
             persisted.candidate ?? candidate,
             finalDecision,
           );
@@ -607,7 +694,10 @@ export const handleSlackBlockAction = async (
             : null;
 
           let nextProduct = null;
-          if (persisted.importId) {
+          if (
+            persisted.requestStatus === WORKFLOW.approved &&
+            persisted.importId
+          ) {
             const importRecord = await getImport(persisted.importId);
             if (importRecord) {
               const remaining = await loadStillActionable(importRecord);
@@ -625,10 +715,20 @@ export const handleSlackBlockAction = async (
             productPageUrl,
             campaignPageUrl,
             importId: persisted.importId,
+            requestId: persisted.candidate.shotRequestId,
             nextProduct,
             testMode: isFakeGeneration(),
           });
           await notify(conversation, resolution.text, { blocks: resolution.blocks });
+        } catch (error) {
+          console.error(
+            "[slack/review]",
+            error instanceof Error ? error.message : "review background failed",
+          );
+          await postResponseUrlBestEffort(
+            responseUrl,
+            ephemeral(SLACK_INTERACTION_MESSAGES.processingFailed),
+          );
         } finally {
           releaseAction(reviewClaimKey);
         }
@@ -637,4 +737,105 @@ export const handleSlackBlockAction = async (
   }
 
   return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.unknownAction) };
+};
+
+/**
+ * Deliver a Block Kit acknowledgement after the HTTP 200 has already been sent.
+ * Prefer chat.update for message replacements; fall back to response_url.
+ */
+export const deliverSlackInteractionResponse = async (
+  payload: SlackInteractionPayload,
+  httpBody: SlackInteractionResponse,
+  deps: Pick<SlackActionDeps, "postResponseUrl" | "updateMessage"> = {},
+): Promise<void> => {
+  const postResponseUrl = deps.postResponseUrl ?? postSlackResponseUrl;
+  const updateMessage = deps.updateMessage ?? updateSlackMessage;
+  const channelId = payload.channel?.id;
+  const messageTs = payload.message?.ts;
+  const responseUrl = payload.response_url;
+
+  const postResponseUrlBestEffort = async (
+    body: SlackInteractionResponse,
+  ): Promise<boolean> => {
+    if (!responseUrl) {
+      return false;
+    }
+    try {
+      await postResponseUrl(responseUrl, body);
+      return true;
+    } catch (error) {
+      console.error(
+        "[slack/response_url]",
+        error instanceof Error ? error.message : "response_url failed",
+      );
+      return false;
+    }
+  };
+
+  if (
+    httpBody.replace_original &&
+    channelId &&
+    messageTs &&
+    Array.isArray(httpBody.blocks) &&
+    httpBody.blocks.length > 0
+  ) {
+    try {
+      await updateMessage({
+        channel: channelId,
+        ts: messageTs,
+        text: httpBody.text,
+        blocks: httpBody.blocks,
+      });
+      return;
+    } catch (error) {
+      console.error(
+        "[slack/interaction-ack]",
+        error instanceof Error ? error.message : "chat.update failed",
+      );
+    }
+  }
+
+  const delivered = await postResponseUrlBestEffort(httpBody);
+  if (!delivered && httpBody.response_type === "ephemeral") {
+    console.error("[slack/interaction-ack] could not deliver ephemeral response");
+  }
+};
+
+/**
+ * Full interaction processing for background execution after the HTTP ack.
+ * Persists reviews, updates messages, and runs generation — never called
+ * synchronously from the route acknowledgement path.
+ */
+export const executeSlackBlockAction = async (
+  payload: SlackInteractionPayload,
+  deps: SlackActionDeps = {},
+): Promise<void> => {
+  const postResponseUrl = deps.postResponseUrl ?? postSlackResponseUrl;
+  try {
+    const result = await handleSlackBlockAction(payload, deps);
+    await deliverSlackInteractionResponse(payload, result.httpBody, deps);
+    if (result.background) {
+      await result.background();
+    }
+  } catch (error) {
+    console.error(
+      "[slack/interactions]",
+      error instanceof Error ? error.message : "interaction processing failed",
+    );
+    if (payload.response_url) {
+      try {
+        await postResponseUrl(
+          payload.response_url,
+          ephemeral(SLACK_INTERACTION_MESSAGES.processingFailed),
+        );
+      } catch (notifyError) {
+        console.error(
+          "[slack/interactions]",
+          notifyError instanceof Error
+            ? notifyError.message
+            : "failed to notify user after interaction error",
+        );
+      }
+    }
+  }
 };

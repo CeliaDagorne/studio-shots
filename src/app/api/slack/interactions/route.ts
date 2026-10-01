@@ -1,9 +1,9 @@
-import { waitUntil } from "@vercel/functions";
 import { NextResponse } from "next/server";
 
+import { scheduleBackground } from "@/lib/background";
 import { env } from "@/lib/env";
 import {
-  handleSlackBlockAction,
+  executeSlackBlockAction,
   parseSlackInteractionFormBody,
 } from "@/lib/slack-actions";
 import { verifySlackRequestSignature } from "@/lib/slack-verify";
@@ -12,6 +12,18 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
+/** Injectable for tests — production uses the real scheduler and executor. */
+export const slackInteractionsRouteDeps = {
+  scheduleBackground,
+  executeSlackBlockAction,
+};
+
+/**
+ * Slack interactivity endpoint.
+ *
+ * Must acknowledge within 3 seconds. Signature verification and payload parse
+ * happen inline; all DB / Slack API / generation work runs in the background.
+ */
 export async function POST(request: Request) {
   const rawBody = await request.text();
 
@@ -33,30 +45,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "invalid_payload" }, { status: 400 });
   }
 
-  try {
-    const result = await handleSlackBlockAction(payload);
+  slackInteractionsRouteDeps.scheduleBackground(
+    slackInteractionsRouteDeps.executeSlackBlockAction(payload),
+    "[slack/interactions]",
+  );
 
-    if (result.background) {
-      waitUntil(
-        result.background().catch((error) => {
-          console.error(
-            "[slack/interactions]",
-            error instanceof Error ? error.message : "background generation failed",
-          );
-        }),
-      );
-    }
-
-    // Immediate Block Kit response keeps Slack under the 3s acknowledgement limit.
-    return NextResponse.json(result.httpBody);
-  } catch (error) {
-    console.error(
-      "[slack/interactions]",
-      error instanceof Error ? error.message : "interaction failed",
-    );
-    return NextResponse.json({
-      response_type: "ephemeral",
-      text: "Something went wrong handling that action. Please try again.",
-    });
-  }
+  // Empty 200 satisfies Slack's acknowledgement deadline. Message updates and
+  // ephemerals are delivered from background work via chat.update / response_url.
+  return new NextResponse(null, { status: 200 });
 }

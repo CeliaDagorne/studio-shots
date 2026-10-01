@@ -6,6 +6,10 @@ import {
   REVIEW_DECISION,
   WORKFLOW,
   candidateCaption,
+  displayCandidateIndexInAttempt,
+  filterLatestGenerationAttempt,
+  generationAttemptId,
+  nextGenerationAttemptStartIndex,
   resolveRequestAfterReviews,
 } from "@/lib/review";
 import { candidateBlobPath } from "@/lib/blob";
@@ -43,6 +47,64 @@ test("resolveRequestAfterReviews marks needs_regeneration below two approvals", 
   assert.equal(resolution.status, WORKFLOW.needsRegeneration);
   if (resolution.status === WORKFLOW.needsRegeneration) {
     assert.equal(resolution.approvedCount, 1);
+  }
+});
+
+test("resolveRequestAfterReviews ignores prior generation attempts", () => {
+  const history = [
+    {
+      candidateIndex: 1,
+      status: CANDIDATE_STATUS.ready,
+      reviewDecision: REVIEW_DECISION.rejected,
+    },
+    {
+      candidateIndex: 2,
+      status: CANDIDATE_STATUS.ready,
+      reviewDecision: REVIEW_DECISION.rejected,
+    },
+    {
+      candidateIndex: 3,
+      status: CANDIDATE_STATUS.ready,
+      reviewDecision: REVIEW_DECISION.rejected,
+    },
+    {
+      candidateIndex: 4,
+      status: CANDIDATE_STATUS.ready,
+      reviewDecision: REVIEW_DECISION.approved,
+    },
+    {
+      candidateIndex: 5,
+      status: CANDIDATE_STATUS.ready,
+      reviewDecision: null,
+    },
+    {
+      candidateIndex: 6,
+      status: CANDIDATE_STATUS.ready,
+      reviewDecision: null,
+    },
+  ];
+
+  assert.equal(nextGenerationAttemptStartIndex(history.slice(0, 3)), 4);
+  assert.equal(generationAttemptId(4), "attempt-2");
+  assert.equal(displayCandidateIndexInAttempt(5), 2);
+  assert.deepEqual(
+    filterLatestGenerationAttempt(history).map((c) => c.candidateIndex),
+    [4, 5, 6],
+  );
+
+  const resolution = resolveRequestAfterReviews(history);
+  assert.equal(resolution.status, WORKFLOW.awaitingReview);
+});
+
+test("all candidates rejected resolves to needs_regeneration", () => {
+  const resolution = resolveRequestAfterReviews([
+    { status: CANDIDATE_STATUS.ready, reviewDecision: REVIEW_DECISION.rejected, candidateIndex: 1 },
+    { status: CANDIDATE_STATUS.ready, reviewDecision: REVIEW_DECISION.rejected, candidateIndex: 2 },
+    { status: CANDIDATE_STATUS.ready, reviewDecision: REVIEW_DECISION.rejected, candidateIndex: 3 },
+  ]);
+  assert.equal(resolution.status, WORKFLOW.needsRegeneration);
+  if (resolution.status === WORKFLOW.needsRegeneration) {
+    assert.equal(resolution.approvedCount, 0);
   }
 });
 

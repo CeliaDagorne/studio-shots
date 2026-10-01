@@ -183,14 +183,75 @@ const postSlackChatMessage = async (body: {
   return (await response.json()) as SlackApiResult;
 };
 
+const postSlackChatUpdate = async (body: {
+  channel: string;
+  ts: string;
+  text: string;
+  blocks?: SlackBlock[];
+}): Promise<SlackApiResult> => {
+  const response = await fetch("https://slack.com/api/chat.update", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${env.slackBotToken}`,
+      "content-type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify({
+      channel: body.channel,
+      ts: body.ts,
+      text: body.text,
+      ...(body.blocks ? { blocks: body.blocks } : {}),
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Slack chat.update HTTP ${response.status}`);
+  }
+
+  return (await response.json()) as SlackApiResult;
+};
+
+/**
+ * Update an existing Slack message (e.g. strip Approve/Reject after review).
+ * Prefer this over response_url — response_url often 404s after the HTTP ack.
+ */
+export const updateSlackMessage = async (params: {
+  channel: string;
+  ts: string;
+  text: string;
+  blocks?: SlackBlock[];
+}): Promise<void> => {
+  const json = await postSlackChatUpdate({
+    channel: params.channel,
+    ts: params.ts,
+    text: params.text,
+    blocks: params.blocks,
+  });
+
+  if (json.ok) {
+    return;
+  }
+
+  const validationMessages = json.response_metadata?.messages ?? [];
+  console.error(
+    "[slack/chat.update]",
+    json.error ?? "unknown_error",
+    validationMessages.length > 0 ? validationMessages : undefined,
+  );
+  throw new SlackPostMessageError(json.error ?? "unknown_error", validationMessages);
+};
+
 /**
  * Post a Slack message. On `invalid_blocks`, logs Slack validation details
- * (never tokens/credentials) and retries once as plain text without blocks.
+ * (never tokens/credentials). By default retries once as plain text without blocks.
+ * Pass `invalidBlocksFallback: "none"` for interactive messages that must not
+ * silently lose action buttons.
  */
 export const postSlackMessage = async (params: {
   channel: string;
   text: string;
   blocks?: SlackBlock[];
+  invalidBlocksFallback?: "plain_text" | "none";
 }): Promise<{ ts?: string; usedFallback?: boolean }> => {
   const json = await postSlackChatMessage({
     channel: params.channel,
@@ -210,7 +271,14 @@ export const postSlackMessage = async (params: {
     validationMessages.length > 0 ? validationMessages : undefined,
   );
 
-  if (json.error === "invalid_blocks" && params.blocks && params.blocks.length > 0) {
+  const allowPlainTextFallback = params.invalidBlocksFallback !== "none";
+
+  if (
+    allowPlainTextFallback &&
+    json.error === "invalid_blocks" &&
+    params.blocks &&
+    params.blocks.length > 0
+  ) {
     const fallback = await postSlackChatMessage({
       channel: params.channel,
       text: params.text,
