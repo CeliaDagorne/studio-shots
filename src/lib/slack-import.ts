@@ -7,6 +7,7 @@ import {
 import { parseCatalogCsv } from "@/lib/csv";
 import { env } from "@/lib/env";
 import { upsertCatalogAndPlanImport } from "@/lib/imports";
+import { isFakeImageGenerationProvider } from "@/lib/image-generation";
 import {
   buildSlackImportPreviewBlocks,
   buildSlackImportPreviewFallbackText,
@@ -145,6 +146,7 @@ export type SlackCatalogImportDeps = {
   upsertImport?: typeof upsertCatalogAndPlanImport;
   postMessage: SlackImportPostMessage;
   appUrl?: string;
+  isFakeGeneration?: () => boolean;
 };
 
 /**
@@ -212,9 +214,14 @@ export const runSlackCatalogImport = async (params: {
     }
 
     const campaignPageUrl = buildCampaignPageUrl(appUrl, summary.importId);
-    const text = buildSlackImportPreviewFallbackText(summary, { campaignPageUrl });
-    const blocks = buildSlackImportPreviewBlocks(summary, { campaignPageUrl });
-
+    const isFake =
+      params.deps.isFakeGeneration ?? isFakeImageGenerationProvider;
+    const previewOptions = {
+      campaignPageUrl,
+      testMode: isFake(),
+    };
+    const text = buildSlackImportPreviewFallbackText(summary, previewOptions);
+    const blocks = buildSlackImportPreviewBlocks(summary, previewOptions);
     await params.deps.postMessage({
       channel: params.channel,
       text,

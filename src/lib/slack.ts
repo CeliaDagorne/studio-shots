@@ -5,6 +5,9 @@ import {
   getLatestImportForConversation,
   loadStillActionableProductsForImport,
 } from "@/lib/imports";
+import {
+  isFakeImageGenerationProvider,
+} from "@/lib/image-generation";
 import { selectNextActionableProduct } from "@/lib/product-selection";
 import type { ImportRow } from "@/lib/schema";
 import type { ActionableProductOption } from "@/types";
@@ -266,6 +269,7 @@ export const processSlackEventCallback = async (
     importId: latestImport.id,
     campaignPageUrl,
     nextProduct,
+    testMode: isFakeImageGenerationProvider(),
   });
 
   await postMessage({

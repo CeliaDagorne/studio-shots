@@ -269,11 +269,12 @@ export const handleSlackBlockAction = async (
     if (actionable.length === 0) {
       const summary = importRecordToSummary(loaded.record);
       const campaignPageUrl = campaignUrlFor(loaded.record.id);
+      const previewOptions = { campaignPageUrl, testMode: isFakeGeneration() };
       await postResponseUrl(responseUrl, {
         replace_original: true,
-        text: `${buildSlackImportPreviewFallbackText(summary, { campaignPageUrl })}\n\n${selectionErrorMessage("unavailable")}`,
+        text: `${buildSlackImportPreviewFallbackText(summary, previewOptions)}\n\n${selectionErrorMessage("unavailable")}`,
         blocks: [
-          ...buildSlackImportPreviewBlocks(summary, { campaignPageUrl }),
+          ...buildSlackImportPreviewBlocks(summary, previewOptions),
           {
             type: "context",
             elements: [
@@ -325,11 +326,12 @@ export const handleSlackBlockAction = async (
     }
     const summary = importRecordToSummary(loaded.record);
     const campaignPageUrl = campaignUrlFor(loaded.record.id);
+    const previewOptions = { campaignPageUrl, testMode: isFakeGeneration() };
     return {
       httpBody: {
         replace_original: true,
-        text: `${buildSlackImportPreviewFallbackText(summary, { campaignPageUrl })}\n\nCancelled.`,
-        blocks: buildSlackCancelledPreviewBlocks(summary, { campaignPageUrl }),
+        text: `${buildSlackImportPreviewFallbackText(summary, previewOptions)}\n\nCancelled.`,
+        blocks: buildSlackCancelledPreviewBlocks(summary, previewOptions),
       },
     };
   }
@@ -353,11 +355,12 @@ export const handleSlackBlockAction = async (
     }
     const summary = importRecordToSummary(loaded.record);
     const campaignPageUrl = campaignUrlFor(loaded.record.id);
+    const previewOptions = { campaignPageUrl, testMode: isFakeGeneration() };
     return {
       httpBody: {
         replace_original: true,
-        text: buildSlackImportPreviewFallbackText(summary, { campaignPageUrl }),
-        blocks: buildSlackImportPreviewBlocks(summary, { campaignPageUrl }),
+        text: buildSlackImportPreviewFallbackText(summary, previewOptions),
+        blocks: buildSlackImportPreviewBlocks(summary, previewOptions),
       },
     };
   }
@@ -499,6 +502,7 @@ export const handleSlackBlockAction = async (
               candidateIndex: row.candidateIndex,
               total: PRIORITY_CANDIDATE_COUNT,
               reviewDecision,
+              testMode: isFakeGeneration(),
             });
             await postResponseUrl(responseUrl, {
               replace_original: true,
@@ -622,6 +626,7 @@ export const handleSlackBlockAction = async (
             campaignPageUrl,
             importId: persisted.importId,
             nextProduct,
+            testMode: isFakeGeneration(),
           });
           await notify(conversation, resolution.text, { blocks: resolution.blocks });
         } finally {

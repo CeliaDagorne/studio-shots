@@ -152,6 +152,7 @@ test("import preview Block Kit includes Generate, Choose product, and Campaign o
   const { buildSlackImportPreviewBlocks, SLACK_ACTION_IDS } = await import("@/lib/slack-blocks");
   const blocks = buildSlackImportPreviewBlocks(sampleSummary(), {
     campaignPageUrl: "https://studio-shots.example/campaigns/import-aaa",
+    testMode: false,
   });
   const serialized = JSON.stringify(blocks);
   assert.match(serialized, /📸 Catalog ready/);
@@ -159,6 +160,8 @@ test("import preview Block Kit includes Generate, Choose product, and Campaign o
   assert.match(serialized, /Planned output/);
   assert.match(serialized, /Estimated cost/);
   assert.match(serialized, /Per product/);
+  assert.doesNotMatch(serialized, /Estimated production cost/);
+  assert.doesNotMatch(serialized, /Test mode/);
   assert.match(serialized, /Format/);
   assert.match(serialized, /4:5/);
   assert.match(serialized, /🎯 \*Up next\*/);
@@ -172,6 +175,40 @@ test("import preview Block Kit includes Generate, Choose product, and Campaign o
   assert.doesNotMatch(serialized, /Catalog-level warnings/);
   assert.match(serialized, new RegExp(SLACK_ACTION_IDS.priority));
   assert.ok(serialized.includes('"type":"divider"'));
+});
+
+test("fake-mode import preview shows free test notice and production cost labels", async () => {
+  const {
+    buildSlackImportPreviewBlocks,
+    buildSlackImportPreviewFallbackText,
+    SLACK_ACTION_IDS,
+  } = await import("@/lib/slack-blocks");
+  const { SLACK_FAKE_GENERATION_CONTEXT } = await import("@/lib/image-generation");
+
+  const blocks = buildSlackImportPreviewBlocks(sampleSummary(), {
+    campaignPageUrl: "https://studio-shots.example/campaigns/import-aaa",
+    testMode: true,
+  });
+  const serialized = JSON.stringify(blocks);
+  assert.match(serialized, /📸 Catalog ready/);
+  assert.match(
+    serialized,
+    new RegExp(SLACK_FAKE_GENERATION_CONTEXT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+  );
+  assert.match(serialized, /Estimated production cost/);
+  assert.match(serialized, /Production cost per product/);
+  assert.doesNotMatch(serialized, /\*Estimated cost\*/);
+  assert.match(serialized, /Generate test candidates: SS-001/);
+  assert.match(serialized, new RegExp(SLACK_ACTION_IDS.priority));
+  assert.doesNotMatch(serialized, /Generate priority: SS-001/);
+
+  const fallback = buildSlackImportPreviewFallbackText(sampleSummary(), {
+    campaignPageUrl: "https://studio-shots.example/campaigns/import-aaa",
+    testMode: true,
+  });
+  assert.match(fallback, /Test mode · Free/);
+  assert.match(fallback, /Estimated production cost/);
+  assert.match(fallback, /Production cost per product/);
 });
 
 test("import preview omits warnings section when empty and shows them when present", async () => {
@@ -197,6 +234,7 @@ test("generation started Block Kit uses creative direction, summary line, and co
   const withIdea = buildSlackGenerationStartedBlocks({
     sku: "SS-001",
     shotIdea: "on a travertine pedestal, warm editorial interior",
+    testMode: false,
   });
   const withIdeaSerialized = JSON.stringify(withIdea);
   assert.match(withIdeaSerialized, /✨ Generating SS-001/);
@@ -208,27 +246,70 @@ test("generation started Block Kit uses creative direction, summary line, and co
   );
   assert.match(withIdeaSerialized, /Using the catalog product photo as the source/);
   assert.match(withIdeaSerialized, /Results will appear here when ready/);
+  assert.doesNotMatch(withIdeaSerialized, /Test mode/);
+  assert.doesNotMatch(withIdeaSerialized, /demo candidates/);
   assert.doesNotMatch(withIdeaSerialized, /image_ref/);
   assert.doesNotMatch(withIdeaSerialized, /as reference/);
 
   const fallback = buildSlackGenerationStartedFallbackText({
     sku: "SS-001",
     shotIdea: "on a travertine pedestal, warm editorial interior",
+    testMode: false,
   });
   assert.match(fallback, /Creative direction/);
   assert.match(fallback, /on a travertine pedestal, warm editorial interior/);
   assert.match(fallback, /3 lifestyle candidates · 4:5 portrait · ~\$0\.13/);
   assert.match(fallback, /Using the catalog product photo as the source/);
+  assert.doesNotMatch(fallback, /Test mode/);
   assert.doesNotMatch(fallback, /image_ref/);
   assert.doesNotMatch(fallback, /as reference/);
 
-  const withoutIdea = JSON.stringify(buildSlackGenerationStartedBlocks({ sku: "SS-002" }));
+  const withoutIdea = JSON.stringify(
+    buildSlackGenerationStartedBlocks({ sku: "SS-002", testMode: false }),
+  );
   assert.doesNotMatch(withoutIdea, /Creative direction/);
   assert.match(withoutIdea, /✨ Generating SS-002/);
   assert.doesNotMatch(
     buildSlackGenerationStartedFallbackText({ sku: "SS-002", shotIdea: "   " }),
     /Creative direction/,
   );
+});
+
+test("fake-mode generation started uses demo wording and free notice", async () => {
+  const {
+    buildSlackGenerationStartedBlocks,
+    buildSlackGenerationStartedFallbackText,
+  } = await import("@/lib/slack-blocks");
+  const { SLACK_FAKE_GENERATION_CONTEXT } = await import("@/lib/image-generation");
+
+  const blocks = buildSlackGenerationStartedBlocks({
+    sku: "SS-001",
+    shotIdea: "on a travertine pedestal, warm editorial interior",
+    testMode: true,
+  });
+  const serialized = JSON.stringify(blocks);
+  assert.match(
+    serialized,
+    new RegExp(SLACK_FAKE_GENERATION_CONTEXT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+  );
+  assert.match(serialized, /\*Creative direction\*/);
+  assert.match(
+    serialized,
+    /\*3 demo candidates\* · \*4:5 portrait\* · \*\$0\.00 charged\*/,
+  );
+  assert.match(serialized, /Creating free demo candidates \(not Luma images\)/);
+  assert.doesNotMatch(serialized, /lifestyle candidates/);
+  assert.doesNotMatch(serialized, /~\$0\.13/);
+
+  const fallback = buildSlackGenerationStartedFallbackText({
+    sku: "SS-001",
+    shotIdea: "on a travertine pedestal, warm editorial interior",
+    testMode: true,
+  });
+  assert.match(fallback, /Test mode · Free/);
+  assert.match(fallback, /3 demo candidates · 4:5 portrait · \$0\.00 charged/);
+  assert.match(fallback, /Creative direction/);
+  assert.match(fallback, /on a travertine pedestal, warm editorial interior/);
 });
 
 test("candidates ready Block Kit summarizes review guidance", async () => {
@@ -369,10 +450,12 @@ test("priority generation action starts the shared generation path", async () =>
   assert.match(result.httpBody.text, /Creative direction/);
   assert.match(result.httpBody.text, /on a travertine pedestal, warm editorial interior/);
   assert.match(result.httpBody.text, /Results will appear/);
-  assert.match(result.httpBody.text, /🧪 Test mode · No Luma generation will be charged/);
+  assert.match(result.httpBody.text, /🧪 Test mode · Free — no Luma calls or generation charges\./);
+  assert.match(result.httpBody.text, /3 demo candidates · 4:5 portrait · \$0\.00 charged/);
   assert.match(JSON.stringify(result.httpBody.blocks), /✨ Generating SS-001/);
   assert.match(JSON.stringify(result.httpBody.blocks), /Creative direction/);
-  assert.match(JSON.stringify(result.httpBody.blocks), /Test mode/);
+  assert.match(JSON.stringify(result.httpBody.blocks), /Test mode · Free/);
+  assert.match(JSON.stringify(result.httpBody.blocks), /\$0\.00 charged/);
   assert.equal(result.httpBody.replace_original, true);
   await result.background!();
   assert.equal(priorityCalls, 1);

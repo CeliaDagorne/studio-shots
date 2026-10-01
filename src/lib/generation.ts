@@ -15,6 +15,7 @@ import { env } from "@/lib/env";
 import { deliverCandidateImage, notifyConversation } from "@/lib/generation-delivery";
 import { parseImportWarningsPayload } from "@/lib/import-meta";
 import { getImageGenerationProvider } from "@/lib/image-generation-provider";
+import { isFakeImageGenerationProvider } from "@/lib/image-generation";
 import { buildImageEditPrompt } from "@/lib/luma";
 import {
   buildProductPageUrl,
@@ -351,8 +352,8 @@ export const runShotRequestGeneration = async (params: {
         sku: claimedRequest.productSku,
         candidateCount: ready.length,
         approvalThreshold: MIN_APPROVALS_TO_COMPLETE,
-      });
-      await notifyConversation(params.conversation, readyMessage.text, {
+        testMode: isFakeImageGenerationProvider(),
+      });      await notifyConversation(params.conversation, readyMessage.text, {
         blocks: readyMessage.blocks,
       });
     } else {

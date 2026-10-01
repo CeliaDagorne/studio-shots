@@ -136,6 +136,7 @@ test("successful Slack catalog import posts Block Kit preview via shared plannin
         posts.push(params);
       },
       appUrl: "https://studio-shots.example",
+      isFakeGeneration: () => false,
     },
   });
 
@@ -154,6 +155,8 @@ test("successful Slack catalog import posts Block Kit preview via shared plannin
   const serialized = JSON.stringify(posts[0]?.blocks);
   assert.match(serialized, /📸 Catalog ready/);
   assert.match(serialized, /Estimated cost/);
+  assert.doesNotMatch(serialized, /Test mode/);
+  assert.doesNotMatch(serialized, /Estimated production cost/);
   assert.match(serialized, /Up next/);
   assert.match(serialized, /SS-001/);
   assert.match(serialized, /Campaign overview/);

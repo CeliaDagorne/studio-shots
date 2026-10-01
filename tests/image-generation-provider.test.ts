@@ -147,17 +147,90 @@ test("Slack generation-started shows test-mode context for fake provider", async
     }),
   );
   assert.match(blocks, new RegExp(SLACK_FAKE_GENERATION_CONTEXT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(blocks, /demo candidates/);
+  assert.match(blocks, /\$0\.00 charged/);
   assert.match(
     buildSlackGenerationStartedFallbackText({
       sku: "SS-001",
       testMode: true,
     }),
-    /Test mode/,
+    /Test mode · Free/,
   );
   assert.doesNotMatch(
     buildSlackGenerationStartedFallbackText({ sku: "SS-001", testMode: false }),
     /Test mode/,
   );
+});
+
+test("fake candidate and continuation messages include compact free notice", async () => {
+  const {
+    buildSlackCandidateBlocks,
+    buildSlackCandidatesReadyBlocks,
+    buildSlackProductResolutionBlocks,
+    buildSlackCampaignStatusBlocks,
+  } = await import("@/lib/slack-blocks");
+  const { SLACK_FAKE_CANDIDATE_CONTEXT } = await import("@/lib/image-generation");
+  const escaped = SLACK_FAKE_CANDIDATE_CONTEXT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  const candidate = JSON.stringify(
+    buildSlackCandidateBlocks({
+      caption: "cap",
+      blobUrl: "https://studio-shots.example/demo/ss-001-lilac-vase.png",
+      candidateId: "cand-1",
+      sku: "SS-001",
+      candidateIndex: 1,
+      total: 3,
+      testMode: true,
+    }).blocks,
+  );
+  assert.match(candidate, new RegExp(escaped));
+
+  const lumaCandidate = JSON.stringify(
+    buildSlackCandidateBlocks({
+      caption: "cap",
+      blobUrl: "https://studio-shots.example/demo/ss-001-lilac-vase.png",
+      candidateId: "cand-1",
+      sku: "SS-001",
+      candidateIndex: 1,
+      total: 3,
+      testMode: false,
+    }).blocks,
+  );
+  assert.doesNotMatch(lumaCandidate, /Test candidate/);
+
+  const ready = JSON.stringify(
+    buildSlackCandidatesReadyBlocks({
+      sku: "SS-001",
+      candidateCount: 3,
+      testMode: true,
+    }).blocks,
+  );
+  assert.match(ready, new RegExp(escaped));
+
+  const resolution = JSON.stringify(
+    buildSlackProductResolutionBlocks({
+      outcome: "approved",
+      sku: "SS-001",
+      approvalCount: 2,
+      productPageUrl: "https://studio-shots.example/products/SS-001",
+      campaignPageUrl: "https://studio-shots.example/campaigns/import-1",
+      importId: "import-1",
+      nextProduct: { requestId: "req-2", sku: "SS-002", priority: "normal" },
+      testMode: true,
+    }).blocks,
+  );
+  assert.match(resolution, new RegExp(escaped));
+  assert.match(resolution, /➡️ \*Next up\*/);
+
+  const status = JSON.stringify(
+    buildSlackCampaignStatusBlocks({
+      importId: "import-1",
+      campaignPageUrl: "https://studio-shots.example/campaigns/import-1",
+      nextProduct: { requestId: "req-2", sku: "SS-002", priority: "high" },
+      testMode: true,
+    }).blocks,
+  );
+  assert.match(status, new RegExp(escaped));
 });
 
 test("fake candidate delivery supports approve, reject, and campaign continuation messaging", async () => {
@@ -198,9 +271,11 @@ test("fake candidate delivery supports approve, reject, and campaign continuatio
     sku: "SS-001",
     candidateIndex: 1,
     total: 3,
+    testMode: true,
   });
   assert.match(JSON.stringify(first.blocks), /cand-flow-1/);
   assert.match(JSON.stringify(first.blocks), /ss-001-lilac-vase/);
+  assert.match(JSON.stringify(first.blocks), /Test candidate/);
 
   const approvedBlocks = finalizeSlackCandidateMessageBlocks(first.blocks, "approved");
   assert.match(JSON.stringify(approvedBlocks), /Approved/);

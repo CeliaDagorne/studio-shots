@@ -5,6 +5,7 @@ import {
   toExternalMessageId,
   type ChatConversation,
 } from "@/lib/chat-identity";
+import { isFakeImageGenerationProvider } from "@/lib/image-generation";
 import { PRIORITY_CANDIDATE_COUNT } from "@/lib/review";
 import { buildSlackCandidateBlocks, type SlackBlock } from "@/lib/slack-blocks";
 import { postSlackMessage } from "@/lib/slack";
@@ -64,8 +65,8 @@ export const deliverCandidateImage = async (params: {
       sku: params.sku,
       candidateIndex: params.candidateIndex,
       total: PRIORITY_CANDIDATE_COUNT,
-    });
-    const posted = await postSlackMessage({
+      testMode: isFakeImageGenerationProvider(),
+    });    const posted = await postSlackMessage({
       channel: requireSlackConversation(params.conversation),
       text: built.text,
       blocks: built.blocks,
