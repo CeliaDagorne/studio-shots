@@ -66,6 +66,54 @@ const CLAIMABLE_WORKFLOW_STATUSES = [
   WORKFLOW.needsRegeneration,
 ] as const;
 
+type GenerationLogContext = {
+  requestId: string;
+  sku: string;
+  attemptId?: string | null;
+};
+
+/** Structured generation logs — never include secrets or API tokens. */
+export const logGeneration = (
+  step: string,
+  ctx: GenerationLogContext,
+  extra?: Record<string, unknown>,
+): void => {
+  console.info("[generation]", {
+    step,
+    requestId: ctx.requestId,
+    sku: ctx.sku,
+    attemptId: ctx.attemptId ?? null,
+    ...(extra ?? {}),
+  });
+};
+
+/**
+ * True when Postgres/Neon rejects generation_attempts writes because migration 0005
+ * is missing (table/column absent). Production historically recorded a mismatched
+ * migration hash without creating the table — generation must still proceed.
+ */
+export const isMissingGenerationAttemptsSchemaError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    /generation_attempts/i.test(message) ||
+    /generation_attempt_id/i.test(message) ||
+    /\b42P01\b/.test(message) ||
+    /\b42703\b/.test(message)
+  );
+};
+
+export type CandidateInsertValues = {
+  id: string;
+  shotRequestId: string;
+  productSku: string;
+  candidateIndex: number;
+  status: string;
+  prompt: string;
+  platform: string;
+  conversationId: string;
+  generationAttemptId?: string;
+};
+
 const hashToUuid = (hex: string): string =>
   [
     hex.slice(0, 8),
@@ -79,6 +127,34 @@ export const stableCandidateId = (shotRequestId: string, index: number): string 
   hashToUuid(
     createHash("sha256").update(`candidate:${shotRequestId}:${index}`).digest("hex"),
   );
+
+/** Build candidate insert rows; omit attempt FK when attempts schema is unavailable. */
+export const buildCandidateInsertValues = (params: {
+  shotRequestId: string;
+  productSku: string;
+  startIndex: number;
+  prompt: string;
+  platform: string;
+  conversationId: string;
+  attemptId: string | null;
+}): CandidateInsertValues[] =>
+  Array.from({ length: PRIORITY_CANDIDATE_COUNT }, (_, index) => {
+    const candidateIndex = params.startIndex + index;
+    const row: CandidateInsertValues = {
+      id: stableCandidateId(params.shotRequestId, candidateIndex),
+      shotRequestId: params.shotRequestId,
+      productSku: params.productSku,
+      candidateIndex,
+      status: CANDIDATE_STATUS.pending,
+      prompt: params.prompt,
+      platform: params.platform,
+      conversationId: params.conversationId,
+    };
+    if (params.attemptId) {
+      row.generationAttemptId = params.attemptId;
+    }
+    return row;
+  });
 
 /**
  * Atomically claim a request for generation/retry/regenerate.
@@ -202,8 +278,20 @@ const processOneCandidate = async (params: {
   productSku: string;
   photoUrl: string;
   prompt: string;
+  requestId: string;
+  attemptId: string | null;
 }): Promise<"ready" | "failed"> => {
   const db = getDb();
+  const logCtx = {
+    requestId: params.requestId,
+    sku: params.productSku,
+    attemptId: params.attemptId,
+  };
+  logGeneration("candidate_pipeline_start", logCtx, {
+    candidateId: params.candidateId,
+    candidateIndex: params.candidateIndex,
+  });
+
   const baseProvider = getImageGenerationProvider();
   const provider = {
     ...baseProvider,
@@ -211,6 +299,11 @@ const processOneCandidate = async (params: {
       input: Parameters<typeof baseProvider.createGeneration>[0],
     ) => {
       const created = await baseProvider.createGeneration(input);
+      logGeneration("luma_submitted", logCtx, {
+        candidateId: params.candidateId,
+        generationId: created.id,
+        state: created.state,
+      });
       await db
         .update(generationCandidates)
         .set({
@@ -238,6 +331,10 @@ const processOneCandidate = async (params: {
         updatedAt: now(),
       })
       .where(eq(generationCandidates.id, params.candidateId));
+    logGeneration("candidate_ready", logCtx, {
+      candidateId: params.candidateId,
+      generationId: result.lumaGenerationId,
+    });
     return "ready";
   }
 
@@ -251,6 +348,11 @@ const processOneCandidate = async (params: {
       updatedAt: now(),
     })
     .where(eq(generationCandidates.id, params.candidateId));
+  logGeneration("candidate_generation_failed", logCtx, {
+    candidateId: params.candidateId,
+    generationId: result.lumaGenerationId ?? null,
+    error: result.errorMessage,
+  });
   return "failed";
 };
 
@@ -586,46 +688,65 @@ export const runShotRequestGeneration = async (params: {
     const startIndex = nextGenerationAttemptStartIndex(existing);
     const attemptLabel = generationAttemptId(startIndex);
     const attemptNumber = generationAttemptNumber(startIndex);
-    const attemptRowId = stableGenerationAttemptId(shotRequestId, attemptNumber);
+    const plannedAttemptId = stableGenerationAttemptId(shotRequestId, attemptNumber);
     const environment = isFakeImageGenerationProvider() ? "test" : "luma";
     const attemptCreatedAt = now();
+    const logCtx = {
+      requestId: shotRequestId,
+      sku: claimedRequest.productSku,
+      attemptId: plannedAttemptId,
+    };
 
-    await db.insert(generationAttempts).values({
-      id: attemptRowId,
+    logGeneration("claimed", logCtx, {
+      startIndex,
+      attemptLabel,
+      attemptNumber,
+    });
+
+    let attemptRowId: string | null = plannedAttemptId;
+    let attemptPersisted = false;
+    try {
+      await db.insert(generationAttempts).values({
+        id: plannedAttemptId,
+        shotRequestId,
+        productSku: claimedRequest.productSku,
+        attemptNumber,
+        isLegacy: false,
+        shotIdea: claimedRequest.shotIdea,
+        aspectRatio: MVP_ASPECT_RATIO,
+        environment,
+        status: "generating",
+        createdAt: attemptCreatedAt,
+        updatedAt: attemptCreatedAt,
+      });
+      attemptPersisted = true;
+      logGeneration("attempt_persisted", logCtx);
+    } catch (error) {
+      if (!isMissingGenerationAttemptsSchemaError(error)) {
+        throw error;
+      }
+      // History migration missing: continue paid/fake generation without attempt rows.
+      attemptRowId = null;
+      logGeneration("attempt_persist_skipped", logCtx, {
+        reason: "generation_attempts_schema_unavailable",
+        error: error instanceof Error ? error.message : "unknown",
+      });
+    }
+
+    const candidateRows = buildCandidateInsertValues({
       shotRequestId,
       productSku: claimedRequest.productSku,
-      attemptNumber,
-      isLegacy: false,
-      shotIdea: claimedRequest.shotIdea,
-      aspectRatio: MVP_ASPECT_RATIO,
-      environment,
-      status: "generating",
-      createdAt: attemptCreatedAt,
-      updatedAt: attemptCreatedAt,
+      startIndex,
+      prompt,
+      platform: params.conversation.platform,
+      conversationId: params.conversation.conversationId,
+      attemptId: attemptRowId,
     });
 
-    const candidateRows = Array.from({ length: PRIORITY_CANDIDATE_COUNT }, (_, index) => {
-      const candidateIndex = startIndex + index;
-      return {
-        id: stableCandidateId(shotRequestId, candidateIndex),
-        shotRequestId,
-        generationAttemptId: attemptRowId,
-        productSku: claimedRequest.productSku,
-        candidateIndex,
-        status: CANDIDATE_STATUS.pending,
-        prompt,
-        platform: params.conversation.platform,
-        conversationId: params.conversation.conversationId,
-      };
+    logGeneration("candidates_inserting", logCtx, {
+      indices: `${startIndex}-${startIndex + PRIORITY_CANDIDATE_COUNT - 1}`,
+      linkedToAttempt: Boolean(attemptRowId),
     });
-
-    console.info(
-      "[generation/attempt]",
-      shotRequestId,
-      attemptLabel,
-      attemptRowId,
-      `indices ${startIndex}-${startIndex + PRIORITY_CANDIDATE_COUNT - 1}`,
-    );
 
     for (const row of candidateRows) {
       await db.insert(generationCandidates).values(row);
@@ -646,6 +767,8 @@ export const runShotRequestGeneration = async (params: {
           productSku: row.productSku,
           photoUrl: resolvePublicAssetUrl(product.photoUrl, env.appUrl),
           prompt,
+          requestId: shotRequestId,
+          attemptId: attemptRowId,
         }),
       ),
     );
@@ -671,18 +794,37 @@ export const runShotRequestGeneration = async (params: {
       (candidate) => candidate.status === CANDIDATE_STATUS.failed,
     );
 
+    logGeneration("pipeline_complete", logCtx, {
+      ready: ready.length,
+      failed: failed.length,
+    });
+
     const attemptStatus = deriveStatusFromCandidates(attemptCandidates);
-    await db
-      .update(generationAttempts)
-      .set({
-        status: attemptStatus,
-        errorMessage: failed[0]?.errorMessage ?? null,
-        updatedAt: now(),
-      })
-      .where(eq(generationAttempts.id, attemptRowId));
+    if (attemptPersisted && attemptRowId) {
+      try {
+        await db
+          .update(generationAttempts)
+          .set({
+            status: attemptStatus,
+            errorMessage: failed[0]?.errorMessage ?? null,
+            updatedAt: now(),
+          })
+          .where(eq(generationAttempts.id, attemptRowId));
+      } catch (error) {
+        if (!isMissingGenerationAttemptsSchemaError(error)) {
+          throw error;
+        }
+        logGeneration("attempt_status_update_skipped", logCtx, {
+          reason: "generation_attempts_schema_unavailable",
+        });
+      }
+    }
 
     if (ready.length === 0) {
       await markRequestStatus(shotRequestId, WORKFLOW.failed);
+      logGeneration("generation_failed_no_ready", logCtx, {
+        firstError: failed[0]?.errorMessage ?? null,
+      });
       await notifyGenerationFailed({
         conversation: params.conversation,
         sku: claimedRequest.productSku,
@@ -703,6 +845,11 @@ export const runShotRequestGeneration = async (params: {
     await markRequestStatus(shotRequestId, WORKFLOW.awaitingReview);
 
     if (delivery.failed > 0) {
+      logGeneration("delivery_failed", logCtx, {
+        delivered: delivery.delivered,
+        failed: delivery.failed,
+        ready: ready.length,
+      });
       await notifyDeliveryFailed({
         conversation: params.conversation,
         sku: claimedRequest.productSku,
@@ -712,6 +859,11 @@ export const runShotRequestGeneration = async (params: {
       });
       return { claimed: true };
     }
+
+    logGeneration("delivery_ok", logCtx, {
+      delivered: delivery.delivered,
+      ready: ready.length,
+    });
 
     try {
       if (failed.length > 0) {
@@ -744,6 +896,10 @@ export const runShotRequestGeneration = async (params: {
     return { claimed: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown generation failure";
+    logGeneration("orchestration_error", {
+      requestId: shotRequestId,
+      sku: claimedRequest.productSku,
+    }, { error: message });
     // Slack presentation failures after candidates are ready should not wipe generation.
     if (/Slack chat\.postMessage failed/i.test(message)) {
       console.error("[generation/slack-presentation]", message);
