@@ -145,7 +145,7 @@ export default async function ProductPage(props: PageProps) {
           )}
         </section>
 
-        {data.historyPagePath ? (
+        {data.historyPagePath && data.generationAttemptCount > 0 ? (
           <div className={styles.historyAction}>
             <Link href={data.historyPagePath} className={styles.secondaryButton}>
               {historyLabel}
