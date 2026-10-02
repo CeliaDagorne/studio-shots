@@ -21,7 +21,9 @@ async function main() {
 
   const found = rows.map((row) => row.table_name as string);
   const missing = expectedTables.filter((name) => !found.includes(name));
-  const extra = found.filter((name) => !expectedTables.includes(name) && name !== "__drizzle_migrations");
+  const extra = found.filter(
+    (name) => !expectedTables.includes(name) && name !== "__drizzle_migrations",
+  );
 
   console.log("Tables in public schema:");
   for (const name of found) {
@@ -37,10 +39,22 @@ async function main() {
     console.log(`Other tables present: ${extra.join(", ")}`);
   }
 
+  if (found.includes("generation_attempts")) {
+    console.log("generation_attempts table is present.");
+  } else {
+    console.log(
+      "generation_attempts table is not present yet (apply drizzle/0005_generation_attempts.sql).",
+    );
+  }
+
   console.log("Verification passed: products, imports, shot_requests exist.");
 }
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.message.replace(/postgres(?:ql)?:\/\/[^\s]+/gi, "[redacted]") : "Verification failed");
+  console.error(
+    error instanceof Error
+      ? error.message.replace(/postgres(?:ql)?:\/\/[^\s]+/gi, "[redacted]")
+      : "Verification failed",
+  );
   process.exit(1);
 });

@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 
-import { resolvePublicAssetUrl } from "@/lib/assets";
 import { candidateBlobPath } from "@/lib/blob";
 import type {
   CreateGenerationParams,
@@ -9,7 +8,10 @@ import type {
   StoreCandidateImageParams,
 } from "@/lib/image-generation";
 
-/** Publishable demo packshots used as deterministic fake candidates. */
+/**
+ * Historical demo packshot paths (one per catalog SKU).
+ * Fake generation no longer cycles these — it reuses the request's own source photoUrl.
+ */
 export const FAKE_CANDIDATE_DEMO_PATHS = [
   "/demo/ss-001-lilac-vase.png",
   "/demo/ss-002-amber-candle.png",
@@ -39,10 +41,11 @@ const fakeGenerationId = (candidateId: string): string => {
   ].join("-");
 };
 
-export const fakeCandidateDemoPath = (candidateIndex: number): string => {
-  const index = Math.max(1, candidateIndex) - 1;
-  return FAKE_CANDIDATE_DEMO_PATHS[index % FAKE_CANDIDATE_DEMO_PATHS.length]!;
-};
+/**
+ * Resolve the output image for a fake candidate.
+ * Always the product's own source photo — never another SKU's demo asset.
+ */
+export const fakeCandidateOutputUrl = (photoUrl: string): string => photoUrl.trim();
 
 type FakeJob = {
   candidateId: string;
@@ -52,7 +55,7 @@ type FakeJob = {
 
 /**
  * Local / Preview provider: never constructs a Luma client or calls Luma.
- * Returns deterministic demo image URLs through the normal candidate result shape.
+ * Reuses the catalog source photo for every candidate so SKUs cannot cross-contaminate.
  */
 export const createFakeGenerationProvider = (
   options: FakeGenerationProviderOptions,
@@ -68,8 +71,15 @@ export const createFakeGenerationProvider = (
     ): Promise<ImageGenerationSnapshot> => {
       await sleep(delayMs);
       const id = fakeGenerationId(params.candidateId);
-      const demoPath = fakeCandidateDemoPath(params.candidateIndex);
-      const outputUrl = resolvePublicAssetUrl(demoPath, options.appUrl);
+      const outputUrl = fakeCandidateOutputUrl(params.photoUrl);
+      if (!outputUrl) {
+        return {
+          id,
+          state: "failed",
+          outputUrl: null,
+          failureReason: "Fake generation requires a product source photoUrl",
+        };
+      }
       jobs.set(id, {
         candidateId: params.candidateId,
         candidateIndex: params.candidateIndex,
@@ -101,7 +111,7 @@ export const createFakeGenerationProvider = (
       };
     },
     storeCandidateImage: async (params: StoreCandidateImageParams) => {
-      // Skip Vercel Blob in fake mode; Slack/product pages use public demo URLs.
+      // Skip Vercel Blob in fake mode; Slack/product pages use the source URL.
       return {
         blobPath: candidateBlobPath(params.sku, params.candidateId),
         blobUrl: params.sourceUrl,

@@ -1,4 +1,5 @@
 import {
+  boolean,
   integer,
   jsonb,
   pgTable,
@@ -68,11 +69,30 @@ export const shotRequests = pgTable("shot_requests", {
   skuHashIdx: uniqueIndex("shot_requests_sku_hash_idx").on(table.productSku, table.requestHash),
 }));
 
+export const generationAttempts = pgTable("generation_attempts", {
+  id: text("id").primaryKey(),
+  shotRequestId: text("shot_request_id")
+    .notNull()
+    .references(() => shotRequests.id),
+  productSku: text("product_sku").notNull().references(() => products.sku),
+  /** 1-based attempt within the request; null for legacy buckets. */
+  attemptNumber: integer("attempt_number"),
+  isLegacy: boolean("is_legacy").default(false).notNull(),
+  shotIdea: text("shot_idea").notNull(),
+  aspectRatio: text("aspect_ratio").notNull(),
+  environment: text("environment"),
+  status: text("status").notNull(),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const generationCandidates = pgTable("generation_candidates", {
   id: text("id").primaryKey(),
   shotRequestId: text("shot_request_id")
     .notNull()
     .references(() => shotRequests.id),
+  generationAttemptId: text("generation_attempt_id").references(() => generationAttempts.id),
   productSku: text("product_sku").notNull().references(() => products.sku),
   candidateIndex: integer("candidate_index").notNull(),
   lumaGenerationId: text("luma_generation_id"),
@@ -99,4 +119,5 @@ export const generationCandidates = pgTable("generation_candidates", {
 export type ProductRow = typeof products.$inferSelect;
 export type ShotRequestRow = typeof shotRequests.$inferSelect;
 export type ImportRow = typeof imports.$inferSelect;
+export type GenerationAttemptRow = typeof generationAttempts.$inferSelect;
 export type GenerationCandidateRow = typeof generationCandidates.$inferSelect;

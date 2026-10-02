@@ -1,5 +1,7 @@
 .env
 .env.local
+.env.production
+.env.production.local
 # Accidental credential files from local tooling (do not commit)
 .take-*-token
 node_modules/

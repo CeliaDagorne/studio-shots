@@ -45,10 +45,8 @@ test("resolveImageGenerationProviderName defaults and production safety", async 
   );
 });
 
-test("fake provider never calls Luma and returns three distinct demo candidates", async () => {
-  const { createFakeGenerationProvider, FAKE_CANDIDATE_DEMO_PATHS } = await import(
-    "@/lib/image-generation-fake"
-  );
+test("fake provider reuses the product source photo for every candidate", async () => {
+  const { createFakeGenerationProvider } = await import("@/lib/image-generation-fake");
   const { runCandidateImagePipeline } = await import("@/lib/candidate-pipeline");
 
   let sleepCalls = 0;
@@ -62,30 +60,29 @@ test("fake provider never calls Luma and returns three distinct demo candidates"
 
   assert.equal(provider.name, "fake");
 
+  const sourceUrl = "https://studio-shots.example/demo/ss-001-lilac-vase.png";
   const urls: string[] = [];
-  for (let index = 1; index <= 3; index += 1) {
+  for (let index = 1; index <= 6; index += 1) {
     const result = await runCandidateImagePipeline(provider, {
       candidateId: `cand-${index}`,
       candidateIndex: index,
       productSku: "SS-001",
-      photoUrl: "https://studio-shots.example/demo/ss-001-lilac-vase.png",
+      photoUrl: sourceUrl,
       prompt: "sunlit console table",
     });
     assert.equal(result.status, "ready");
     if (result.status === "ready") {
       assert.match(result.lumaGenerationId, /^[0-9a-f-]{36}$/);
       assert.equal(result.lumaState, "completed");
-      assert.match(result.blobUrl, /\/demo\//);
+      assert.equal(result.blobUrl, sourceUrl);
       urls.push(result.blobUrl);
     }
   }
 
-  assert.equal(new Set(urls).size, 3);
-  assert.deepEqual(
-    urls.map((url) => url.replace("https://studio-shots.example", "")),
-    [...FAKE_CANDIDATE_DEMO_PATHS],
-  );
-  assert.ok(sleepCalls >= 6, "expected create+poll delays for loading-state simulation");
+  assert.equal(new Set(urls).size, 1);
+  assert.ok(urls.every((url) => url.includes("ss-001-lilac-vase")));
+  assert.ok(urls.every((url) => !url.includes("ss-002") && !url.includes("ss-003")));
+  assert.ok(sleepCalls >= 12, "expected create+poll delays for loading-state simulation");
 });
 
 test("fake mode works without LUMA_AGENTS_API_KEY and never loads the Luma provider", async () => {

@@ -12,6 +12,10 @@ import {
 } from "@/lib/chat-identity";
 import { getDb } from "@/lib/db";
 import { env } from "@/lib/env";
+import {
+  deriveStatusFromCandidates,
+  stableGenerationAttemptId,
+} from "@/lib/generation-attempts";
 import { deliverCandidateImage, notifyConversation } from "@/lib/generation-delivery";
 import { parseImportWarningsPayload } from "@/lib/import-meta";
 import { getImageGenerationProvider } from "@/lib/image-generation-provider";
@@ -26,6 +30,7 @@ import {
   displayCandidateIndexInAttempt,
   filterLatestGenerationAttempt,
   generationAttemptId,
+  generationAttemptNumber,
   MIN_APPROVALS_TO_COMPLETE,
   nextGenerationAttemptStartIndex,
   PRIORITY_CANDIDATE_COUNT,
@@ -34,7 +39,14 @@ import {
   candidateCaption,
   resolveRequestAfterReviews,
 } from "@/lib/review";
-import { generationCandidates, imports, products, shotRequests } from "@/lib/schema";
+import { MVP_ASPECT_RATIO } from "@/lib/request-planning";
+import {
+  generationAttempts,
+  generationCandidates,
+  imports,
+  products,
+  shotRequests,
+} from "@/lib/schema";
 import {
   buildSlackCandidatesReadyBlocks,
   buildSlackDeliveryFailedBlocks,
@@ -573,12 +585,31 @@ export const runShotRequestGeneration = async (params: {
 
     const startIndex = nextGenerationAttemptStartIndex(existing);
     const attemptLabel = generationAttemptId(startIndex);
+    const attemptNumber = generationAttemptNumber(startIndex);
+    const attemptRowId = stableGenerationAttemptId(shotRequestId, attemptNumber);
+    const environment = isFakeImageGenerationProvider() ? "test" : "luma";
+    const attemptCreatedAt = now();
+
+    await db.insert(generationAttempts).values({
+      id: attemptRowId,
+      shotRequestId,
+      productSku: claimedRequest.productSku,
+      attemptNumber,
+      isLegacy: false,
+      shotIdea: claimedRequest.shotIdea,
+      aspectRatio: MVP_ASPECT_RATIO,
+      environment,
+      status: "generating",
+      createdAt: attemptCreatedAt,
+      updatedAt: attemptCreatedAt,
+    });
 
     const candidateRows = Array.from({ length: PRIORITY_CANDIDATE_COUNT }, (_, index) => {
       const candidateIndex = startIndex + index;
       return {
         id: stableCandidateId(shotRequestId, candidateIndex),
         shotRequestId,
+        generationAttemptId: attemptRowId,
         productSku: claimedRequest.productSku,
         candidateIndex,
         status: CANDIDATE_STATUS.pending,
@@ -592,6 +623,7 @@ export const runShotRequestGeneration = async (params: {
       "[generation/attempt]",
       shotRequestId,
       attemptLabel,
+      attemptRowId,
       `indices ${startIndex}-${startIndex + PRIORITY_CANDIDATE_COUNT - 1}`,
     );
 
@@ -638,6 +670,16 @@ export const runShotRequestGeneration = async (params: {
     const failed = attemptCandidates.filter(
       (candidate) => candidate.status === CANDIDATE_STATUS.failed,
     );
+
+    const attemptStatus = deriveStatusFromCandidates(attemptCandidates);
+    await db
+      .update(generationAttempts)
+      .set({
+        status: attemptStatus,
+        errorMessage: failed[0]?.errorMessage ?? null,
+        updatedAt: now(),
+      })
+      .where(eq(generationAttempts.id, attemptRowId));
 
     if (ready.length === 0) {
       await markRequestStatus(shotRequestId, WORKFLOW.failed);

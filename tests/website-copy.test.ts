@@ -9,9 +9,14 @@ import {
   HOME_HERO_TITLE,
   HOME_LATEST_CAMPAIGN_SUFFIX,
   HOME_STEPS,
-  PRODUCT_EMPTY_APPROVED_SUFFIX,
+  PRODUCT_APPROVED_DESCRIPTION,
+  PRODUCT_APPROVED_HEADING,
+  PRODUCT_EMPTY_APPROVED_BODY,
+  PRODUCT_EMPTY_APPROVED_TITLE,
+  PRODUCT_HISTORY_TITLE,
   PRODUCT_NOT_FOUND_BODY,
   SITE_DESCRIPTION,
+  productHistoryDescription,
 } from "@/lib/website-copy";
 
 test("website copy presents Slack as the primary workflow", () => {
@@ -45,8 +50,13 @@ test("campaign and product website states instruct Slack, not Telegram", () => {
   assert.doesNotMatch(CAMPAIGN_METRICS_INTRO, /Telegram|\/status/);
   assert.match(CAMPAIGN_NOT_FOUND_BODY, /Import a catalog in Slack/);
   assert.doesNotMatch(CAMPAIGN_NOT_FOUND_BODY, /Telegram|\/import/);
-  assert.match(PRODUCT_EMPTY_APPROVED_SUFFIX, /in Slack/);
-  assert.doesNotMatch(PRODUCT_EMPTY_APPROVED_SUFFIX, /Telegram/);
+  assert.match(PRODUCT_EMPTY_APPROVED_TITLE, /No approved images yet/);
+  assert.match(PRODUCT_EMPTY_APPROVED_BODY, /in Slack/);
+  assert.doesNotMatch(PRODUCT_EMPTY_APPROVED_BODY, /Telegram/);
+  assert.equal(PRODUCT_APPROVED_HEADING, "Approved images");
+  assert.equal(PRODUCT_APPROVED_DESCRIPTION, "Final images approved by your team.");
+  assert.equal(PRODUCT_HISTORY_TITLE, "Generation history");
+  assert.match(productHistoryDescription("SS-001"), /SS-001/);
   assert.match(PRODUCT_NOT_FOUND_BODY, /Import the CSV in Slack/);
   assert.doesNotMatch(PRODUCT_NOT_FOUND_BODY, /Telegram/);
 });

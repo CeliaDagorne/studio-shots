@@ -28,6 +28,10 @@ export const PRIORITY_CANDIDATE_COUNT = CANDIDATES_PER_REQUEST;
 export const generationAttemptId = (candidateIndex: number): string =>
   `attempt-${Math.ceil(candidateIndex / PRIORITY_CANDIDATE_COUNT)}`;
 
+/** 1-based attempt number for a candidate index (4 → 2). */
+export const generationAttemptNumber = (candidateIndex: number): number =>
+  Math.ceil(candidateIndex / PRIORITY_CANDIDATE_COUNT);
+
 /** Display index within an attempt (4 → 1, 5 → 2, 6 → 3). */
 export const displayCandidateIndexInAttempt = (candidateIndex: number): number =>
   ((candidateIndex - 1) % PRIORITY_CANDIDATE_COUNT) + 1;

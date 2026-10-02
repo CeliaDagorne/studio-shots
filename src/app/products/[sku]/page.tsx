@@ -3,10 +3,16 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { GradientButton } from "@/components/gradient-button";
-import { formatPriceCents, getProductPageData } from "@/lib/products";
 import {
-  PRODUCT_EMPTY_APPROVED_PREFIX,
-  PRODUCT_EMPTY_APPROVED_SUFFIX,
+  formatPriceCents,
+  getProductPageData,
+  readCampaignImportId,
+} from "@/lib/products";
+import {
+  PRODUCT_APPROVED_DESCRIPTION,
+  PRODUCT_APPROVED_HEADING,
+  PRODUCT_EMPTY_APPROVED_BODY,
+  PRODUCT_EMPTY_APPROVED_TITLE,
 } from "@/lib/website-copy";
 
 import styles from "./product.module.css";
@@ -18,19 +24,6 @@ type PageProps = {
   searchParams: Promise<{ campaign?: string | string[] }>;
 };
 
-const readCampaignImportId = (
-  value: string | string[] | undefined,
-): string | null => {
-  if (typeof value === "string" && value.trim()) {
-    return value.trim();
-  }
-  if (Array.isArray(value)) {
-    const first = value.find((entry) => typeof entry === "string" && entry.trim());
-    return first?.trim() ?? null;
-  }
-  return null;
-};
-
 export async function generateMetadata(props: PageProps): Promise<Metadata> {
   const params = await props.params;
   const data = await getProductPageData(params.sku);
@@ -39,7 +32,7 @@ export async function generateMetadata(props: PageProps): Promise<Metadata> {
   }
   return {
     title: `${data.productName} · Studio Shots`,
-    description: `Styled photography for ${data.productName} (${data.sku})`,
+    description: `Approved photography for ${data.productName} (${data.sku})`,
   };
 }
 
@@ -53,8 +46,11 @@ export default async function ProductPage(props: PageProps) {
     notFound();
   }
 
-  const heroImage = data.approvedCandidates[0]?.blobUrl ?? data.photoUrl;
   const hasApproved = data.approvedCandidates.length > 0;
+  const historyLabel =
+    data.generationAttemptCount === 1
+      ? "View generation history (1 attempt)"
+      : `View generation history (${data.generationAttemptCount} attempts)`;
 
   return (
     <main className={styles.page}>
@@ -68,12 +64,8 @@ export default async function ProductPage(props: PageProps) {
           <div className={styles.heroMedia}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={heroImage}
-              alt={
-                hasApproved
-                  ? `${data.productName} styled shot`
-                  : `${data.productName} catalog photo`
-              }
+              src={data.photoUrl}
+              alt={`${data.productName} source catalog photo`}
             />
           </div>
 
@@ -86,6 +78,18 @@ export default async function ProductPage(props: PageProps) {
               <li>{data.colorOrFinish}</li>
               <li>{data.material}</li>
             </ul>
+            {data.shotIdea ? (
+              <p className={styles.shotIdea}>
+                <span className={styles.detailLabel}>Shot Idea</span>
+                {data.shotIdea}
+              </p>
+            ) : null}
+            {data.workflowStatusLabel ? (
+              <p className={styles.status}>
+                <span className={styles.detailLabel}>Status</span>
+                {data.workflowStatusLabel}
+              </p>
+            ) : null}
             {data.campaignPagePath ? (
               <div className={styles.actions}>
                 <GradientButton href={data.campaignPagePath}>
@@ -96,33 +100,34 @@ export default async function ProductPage(props: PageProps) {
           </div>
         </section>
 
-        <section className={styles.section} aria-labelledby="styled-heading">
+        <section className={styles.section} aria-labelledby="approved-heading">
           <div className={styles.sectionHead}>
-            <h2 id="styled-heading">Approved styled shots</h2>
-            <p>
-              Reviewer-approved lifestyle images for product pages, social, and campaigns.
-              Rejected candidates stay out of this gallery. The e-commerce team can download each
-              approved file below.
-            </p>
+            <h2 id="approved-heading">{PRODUCT_APPROVED_HEADING}</h2>
+            <p>{PRODUCT_APPROVED_DESCRIPTION}</p>
           </div>
 
           {hasApproved ? (
-            <div className={styles.gallery}>
+            <div className={styles.gallery} aria-labelledby="approved-heading">
               {data.approvedCandidates.map((candidate) => (
                 <figure key={candidate.id} className={styles.figure}>
                   <div className={styles.figureFrame}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={candidate.blobUrl}
-                      alt={`${data.productName} approved candidate ${candidate.candidateIndex}`}
+                      alt={`${data.productName} approved image ${candidate.displayIndex}`}
                     />
                   </div>
                   <figcaption className={styles.figureCaption}>
-                    <span>Shot {candidate.candidateIndex}</span>
+                    <span>
+                      Candidate {candidate.displayIndex}/{candidate.totalInAttempt}
+                      {data.generationAttemptCount > 1
+                        ? ` · Attempt ${candidate.attemptNumber}`
+                        : ""}
+                    </span>
                     <a
                       className={styles.download}
                       href={candidate.blobUrl}
-                      download={`${data.sku}-approved-${candidate.candidateIndex}.jpg`}
+                      download={`${data.sku}-approved-${candidate.attemptNumber}-${candidate.displayIndex}.jpg`}
                       target="_blank"
                       rel="noreferrer"
                     >
@@ -133,11 +138,20 @@ export default async function ProductPage(props: PageProps) {
               ))}
             </div>
           ) : (
-            <p className={styles.empty}>
-              {PRODUCT_EMPTY_APPROVED_PREFIX} {data.sku}. {PRODUCT_EMPTY_APPROVED_SUFFIX}
-            </p>
+            <div className={styles.empty}>
+              <p className={styles.emptyTitle}>{PRODUCT_EMPTY_APPROVED_TITLE}</p>
+              <p>{PRODUCT_EMPTY_APPROVED_BODY}</p>
+            </div>
           )}
         </section>
+
+        {data.historyPagePath ? (
+          <div className={styles.historyAction}>
+            <Link href={data.historyPagePath} className={styles.secondaryButton}>
+              {historyLabel}
+            </Link>
+          </div>
+        ) : null}
 
         <section className={styles.section} aria-labelledby="original-heading">
           <div className={styles.sectionHead}>

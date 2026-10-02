@@ -44,9 +44,15 @@ export const CAMPAIGN_METRICS_INTRO =
 export const CAMPAIGN_NOT_FOUND_BODY =
   "That campaign overview does not exist, or the import id is invalid. Import a catalog in Slack and mention @Studio Shots with import to create a campaign, or return home.";
 
-export const PRODUCT_EMPTY_APPROVED_PREFIX = "No approved styled shots yet for";
-export const PRODUCT_EMPTY_APPROVED_SUFFIX =
-  "Once a reviewer approves candidates in Slack, they will appear here automatically.";
+export const PRODUCT_APPROVED_HEADING = "Approved images";
+export const PRODUCT_APPROVED_DESCRIPTION = "Final images approved by your team.";
+export const PRODUCT_EMPTY_APPROVED_TITLE = "No approved images yet";
+export const PRODUCT_EMPTY_APPROVED_BODY =
+  "Generate or review candidates in Slack to add final images here.";
+
+export const PRODUCT_HISTORY_TITLE = "Generation history";
+export const productHistoryDescription = (sku: string): string =>
+  `Every generation attempt and review decision for ${sku}.`;
 
 export const PRODUCT_NOT_FOUND_BODY =
   "That SKU is not in the imported catalog yet. Import the CSV in Slack, then open the product page again.";

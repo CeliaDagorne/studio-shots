@@ -129,6 +129,8 @@ npm run webhook:info
 | `npm run typecheck` | TypeScript |
 | `npm run build` | Production build |
 | `npm run db:migrate` | Apply Drizzle SQL migrations |
+| `npm run db:inspect-history` | Read-only generation history diagnostic |
+| `npm run db:backfill-attempts` | Dry-run (default) / `--write` attempt backfill |
 | `npm run set:webhook` | Register Telegram webhook |
 | `npm run webhook:info` | Inspect Telegram webhook |
 
@@ -136,6 +138,7 @@ npm run webhook:info
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): system flow, adapters, and key mechanics
 - [DECISIONS.md](DECISIONS.md): product and engineering choices
+- [docs/GENERATION_HISTORY.md](docs/GENERATION_HISTORY.md): history page, migration, and backfill
 
 ## License
 

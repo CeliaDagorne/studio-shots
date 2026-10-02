@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 
 import {
   buildProductPageUrl,
+  excludeForeignSkuDemoUrls,
   filterApprovedCandidates,
   formatApprovalCompletionMessage,
   formatPriceCents,
+  groupApprovedCandidatesByAttempt,
 } from "@/lib/products";
 import { aggregateStudioStatus, formatStudioStatusMessage } from "@/lib/status";
 
@@ -50,7 +52,100 @@ test("filterApprovedCandidates keeps only ready + approved + blob-backed images"
     ["a", "d"],
   );
   assert.equal(filtered[0]?.candidateIndex, 2);
+  assert.equal(filtered[0]?.displayIndex, 2);
+  assert.equal(filtered[0]?.attemptNumber, 1);
+  assert.equal(filtered[1]?.displayIndex, 1);
+  assert.equal(filtered[1]?.attemptNumber, 2);
   assert.equal(filtered.every((row) => row.blobUrl.includes("blob.example")), true);
+});
+
+test("groupApprovedCandidatesByAttempt uses local 1–3 numbering and newest first", () => {
+  const grouped = groupApprovedCandidatesByAttempt(
+    filterApprovedCandidates([
+      {
+        id: "a1",
+        candidateIndex: 1,
+        status: "ready",
+        reviewDecision: "approved",
+        blobUrl: "https://studio-shots.example/demo/ss-001-lilac-vase.png",
+        blobPath: "candidates/SS-001/a1.jpg",
+      },
+      {
+        id: "a2",
+        candidateIndex: 2,
+        status: "ready",
+        reviewDecision: "approved",
+        blobUrl: "https://studio-shots.example/demo/ss-001-lilac-vase.png",
+        blobPath: "candidates/SS-001/a2.jpg",
+      },
+      {
+        id: "b1",
+        candidateIndex: 4,
+        status: "ready",
+        reviewDecision: "approved",
+        blobUrl: "https://studio-shots.example/demo/ss-001-lilac-vase.png",
+        blobPath: "candidates/SS-001/b1.jpg",
+      },
+      {
+        id: "b2",
+        candidateIndex: 5,
+        status: "ready",
+        reviewDecision: "approved",
+        blobUrl: "https://studio-shots.example/demo/ss-001-lilac-vase.png",
+        blobPath: "candidates/SS-001/b2.jpg",
+      },
+      {
+        id: "b3",
+        candidateIndex: 6,
+        status: "ready",
+        reviewDecision: "approved",
+        blobUrl: "https://studio-shots.example/demo/ss-001-lilac-vase.png",
+        blobPath: "candidates/SS-001/b3.jpg",
+      },
+    ]),
+  );
+
+  assert.equal(grouped.length, 2);
+  assert.equal(grouped[0]?.attemptNumber, 2);
+  assert.deepEqual(
+    grouped[0]?.candidates.map((c) => c.displayIndex),
+    [1, 2, 3],
+  );
+  assert.equal(grouped[1]?.attemptNumber, 1);
+
+  const cleaned = excludeForeignSkuDemoUrls("SS-001", [
+    {
+      id: "ok",
+      candidateIndex: 4,
+      attemptNumber: 2,
+      displayIndex: 1,
+      totalInAttempt: 3,
+      blobUrl: "https://studio-shots.example/demo/ss-001-lilac-vase.png",
+      blobPath: null,
+    },
+    {
+      id: "candle",
+      candidateIndex: 5,
+      attemptNumber: 2,
+      displayIndex: 2,
+      totalInAttempt: 3,
+      blobUrl: "https://studio-shots.example/demo/ss-002-amber-candle.png",
+      blobPath: null,
+    },
+    {
+      id: "bag",
+      candidateIndex: 6,
+      attemptNumber: 2,
+      displayIndex: 3,
+      totalInAttempt: 3,
+      blobUrl: "https://studio-shots.example/demo/ss-003-olive-weekend-bag.png",
+      blobPath: null,
+    },
+  ]);
+  assert.deepEqual(
+    cleaned.map((row) => row.id),
+    ["ok"],
+  );
 });
 
 test("buildProductPageUrl and approval completion message use APP_URL", () => {
