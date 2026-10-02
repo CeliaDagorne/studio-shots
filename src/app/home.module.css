@@ -91,7 +91,6 @@
   display: grid;
   gap: 2.5rem;
   padding: 2.25rem 0 2.75rem;
-  animation: rise 700ms ease both;
 }
 
 .heroCopy {
@@ -113,7 +112,7 @@
   margin: 0;
   max-width: 16ch;
   font-family: var(--font-display), Georgia, serif;
-  font-size: clamp(2.15rem, 5.5vw, 3.35rem);
+  font-size: clamp(2.15rem, 5.5vw, 3.15rem);
   font-weight: 520;
   line-height: 1.05;
   letter-spacing: -0.035em;
@@ -320,7 +319,6 @@
 
 .section {
   margin-bottom: 3.25rem;
-  animation: rise 800ms ease both;
 }
 
 .sectionHead {
@@ -372,8 +370,7 @@
   border: 1px solid var(--line);
   background:
     linear-gradient(160deg, rgba(248, 238, 220, 0.55), transparent 55%),
-    linear-gradient(20deg, rgba(220, 204, 240, 0.35), transparent 50%),
-    #fff;
+    linear-gradient(20deg, rgba(220, 204, 240, 0.35), transparent 50%), #fff;
   overflow: hidden;
 }
 
@@ -637,8 +634,7 @@
   border-radius: calc(var(--radius) + 0.15rem);
   background:
     linear-gradient(135deg, rgba(248, 238, 220, 0.45), transparent 45%),
-    linear-gradient(320deg, rgba(200, 212, 244, 0.28), transparent 40%),
-    #fff;
+    linear-gradient(320deg, rgba(200, 212, 244, 0.28), transparent 40%), #fff;
   box-shadow: var(--shadow-soft);
   text-align: center;
   justify-items: center;

@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { GradientButton } from "@/components/gradient-button";
 import { ProductCard, ProductCardGrid } from "@/components/product-card";
+import { ScrollReveal } from "@/components/scroll-reveal";
 import {
   DEMO_CATALOG_PRODUCTS,
   PUBLIC_ARCHITECTURE_URL,
@@ -89,7 +90,7 @@ export default async function HomePage() {
 
       <div className={styles.shell}>
         <section className={styles.hero} aria-labelledby="home-hero-title">
-          <div className={styles.heroCopy}>
+          <ScrollReveal direction="left" className={styles.heroCopy}>
             <p className={styles.eyebrow}>{HOME_HERO_EYEBROW}</p>
             <h1 id="home-hero-title">{HOME_HERO_TITLE}</h1>
             <p className={styles.lede}>{HOME_HERO_LEDE}</p>
@@ -109,9 +110,9 @@ export default async function HomePage() {
             ) : (
               <p className={styles.hint}>{HOME_EMPTY_CAMPAIGN}</p>
             )}
-          </div>
+          </ScrollReveal>
 
-          <div className={styles.heroVisual}>
+          <ScrollReveal direction="right" className={styles.heroVisual} delayMs={80}>
             <div className={styles.visualStage}>
               <div className={styles.primaryShot}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -144,22 +145,22 @@ export default async function HomePage() {
                 </div>
               </div>
             </div>
-          </div>
+          </ScrollReveal>
         </section>
 
         <section className={styles.trust} aria-label="Product values">
-          <div className={styles.trustItem}>
+          <ScrollReveal direction="up" delayMs={0} className={styles.trustItem}>
             <strong>Cost preview before generation</strong>
             <span>See estimated spend before any paid Luma run.</span>
-          </div>
-          <div className={styles.trustItem}>
+          </ScrollReveal>
+          <ScrollReveal direction="up" delayMs={70} className={styles.trustItem}>
             <strong>Review directly in Slack</strong>
             <span>Approve or reject candidates in the same channel.</span>
-          </div>
-          <div className={styles.trustItem}>
+          </ScrollReveal>
+          <ScrollReveal direction="up" delayMs={140} className={styles.trustItem}>
             <strong>Approved assets in one place</strong>
             <span>Final images land on shared product pages.</span>
-          </div>
+          </ScrollReveal>
         </section>
 
         <section className={styles.section} aria-labelledby="steps-heading">
@@ -168,7 +169,7 @@ export default async function HomePage() {
             <p>{HOME_STEPS_INTRO}</p>
           </div>
           <ol className={styles.steps}>
-            <li className={styles.step}>
+            <ScrollReveal as="li" direction="up" delayMs={0} className={styles.step}>
               <div className={styles.stepFigure} aria-hidden="true">
                 <div className={styles.stepMock}>
                   <div className={`${styles.mockLine} ${styles.mockLineWide}`} />
@@ -184,8 +185,8 @@ export default async function HomePage() {
                 <strong>{HOME_STEPS[0].title}</strong>
                 <span>{HOME_STEPS[0].body}</span>
               </div>
-            </li>
-            <li className={styles.step}>
+            </ScrollReveal>
+            <ScrollReveal as="li" direction="up" delayMs={70} className={styles.step}>
               <div className={styles.stepFigure} aria-hidden="true">
                 <div className={styles.stepMock}>
                   <div className={`${styles.mockLine} ${styles.mockLineMid}`} />
@@ -201,8 +202,8 @@ export default async function HomePage() {
                 <strong>{HOME_STEPS[1].title}</strong>
                 <span>{HOME_STEPS[1].body}</span>
               </div>
-            </li>
-            <li className={styles.step}>
+            </ScrollReveal>
+            <ScrollReveal as="li" direction="up" delayMs={140} className={styles.step}>
               <div className={styles.stepFigure} aria-hidden="true">
                 <div className={styles.stepMock}>
                   <div className={styles.mockThumbRow}>
@@ -216,8 +217,8 @@ export default async function HomePage() {
                 <strong>{HOME_STEPS[2].title}</strong>
                 <span>{HOME_STEPS[2].body}</span>
               </div>
-            </li>
-            <li className={styles.step}>
+            </ScrollReveal>
+            <ScrollReveal as="li" direction="up" delayMs={210} className={styles.step}>
               <div className={styles.stepFigure} aria-hidden="true">
                 <div className={styles.stepMock}>
                   <div className={styles.mockThumbRow}>
@@ -231,17 +232,22 @@ export default async function HomePage() {
                 <strong>{HOME_STEPS[3].title}</strong>
                 <span>{HOME_STEPS[3].body}</span>
               </div>
-            </li>
+            </ScrollReveal>
           </ol>
         </section>
 
         <section className={styles.section} aria-labelledby="chat-first-heading">
           <div className={styles.split}>
-            <div className={styles.sectionHead}>
+            <ScrollReveal direction="left" className={styles.sectionHead}>
               <h2 id="chat-first-heading">{HOME_CHAT_FIRST_TITLE}</h2>
               <p>{HOME_CHAT_FIRST_BODY}</p>
-            </div>
-            <div className={styles.slackPreview} aria-label="Slack workflow preview">
+            </ScrollReveal>
+            <ScrollReveal
+              direction="right"
+              delayMs={90}
+              className={styles.slackPreview}
+              aria-label="Slack workflow preview"
+            >
               <div className={styles.slackHeader}>
                 <span className={styles.slackDot} aria-hidden="true" />
                 <strong>#studio-shots</strong>
@@ -270,13 +276,13 @@ export default async function HomePage() {
                   </div>
                 </div>
               </div>
-            </div>
+            </ScrollReveal>
           </div>
         </section>
 
         <section className={styles.section} aria-labelledby="campaign-heading">
           <div className={styles.split}>
-            <div className={styles.campaignPanel}>
+            <ScrollReveal direction="left" className={styles.campaignPanel}>
               <h2 id="campaign-heading" className={styles.panelTitle}>
                 Campaign overview
               </h2>
@@ -304,8 +310,8 @@ export default async function HomePage() {
               <GradientButton href={demoHref} variant="secondary">
                 {latestCampaign ? "Open campaign overview" : "Browse demo product"}
               </GradientButton>
-            </div>
-            <div className={styles.sectionHead}>
+            </ScrollReveal>
+            <ScrollReveal direction="right" delayMs={90} className={styles.sectionHead}>
               <h2>{HOME_CAMPAIGN_SECTION_TITLE}</h2>
               <p>{HOME_CAMPAIGN_SECTION_BODY}</p>
               {latestCampaign ? (
@@ -318,7 +324,7 @@ export default async function HomePage() {
                   Metrics use the shipped demo catalog until you import a campaign in Slack.
                 </p>
               )}
-            </div>
+            </ScrollReveal>
           </div>
         </section>
 
@@ -345,7 +351,12 @@ export default async function HomePage() {
           </ProductCardGrid>
         </section>
 
-        <section className={styles.finalCta} aria-labelledby="final-cta-heading">
+        <ScrollReveal
+          as="section"
+          direction="up"
+          className={styles.finalCta}
+          aria-labelledby="final-cta-heading"
+        >
           <h2 id="final-cta-heading">{HOME_FINAL_CTA_TITLE}</h2>
           <p>{HOME_FINAL_CTA_BODY}</p>
           <div className={styles.ctaRow}>
@@ -357,7 +368,7 @@ export default async function HomePage() {
               Architecture
             </GradientButton>
           </div>
-        </section>
+        </ScrollReveal>
       </div>
     </main>
   );
