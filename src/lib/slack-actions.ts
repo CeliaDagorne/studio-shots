@@ -282,13 +282,36 @@ export const handleSlackBlockAction = async (
     page: number,
     responseUrl: string | undefined,
   ) => {
-    if (!responseUrl) {
-      return;
-    }
+    const publishPickerMessage = async (body: SlackInteractionResponse) => {
+      // Prefer chat.update — response_url frequently 404s after the empty HTTP ack.
+      if (
+        body.replace_original &&
+        channelId &&
+        payload.message?.ts &&
+        Array.isArray(body.blocks) &&
+        body.blocks.length > 0
+      ) {
+        try {
+          await updateMessage({
+            channel: channelId,
+            ts: payload.message.ts,
+            text: body.text,
+            blocks: body.blocks,
+          });
+          return;
+        } catch (error) {
+          console.error(
+            "[slack/picker]",
+            error instanceof Error ? error.message : "chat.update failed",
+          );
+        }
+      }
+      await postResponseUrlBestEffort(responseUrl, body);
+    };
 
     const loaded = await loadAuthorizedImport(importId);
     if (!loaded.ok) {
-      await postResponseUrl(responseUrl, ephemeral(loaded.message));
+      await publishPickerMessage(ephemeral(loaded.message));
       return;
     }
 
@@ -297,7 +320,7 @@ export const handleSlackBlockAction = async (
       const summary = importRecordToSummary(loaded.record);
       const campaignPageUrl = campaignUrlFor(loaded.record.id);
       const previewOptions = { campaignPageUrl, testMode: isFakeGeneration() };
-      await postResponseUrl(responseUrl, {
+      await publishPickerMessage({
         replace_original: true,
         text: `${buildSlackImportPreviewFallbackText(summary, previewOptions)}\n\n${selectionErrorMessage("unavailable")}`,
         blocks: [
@@ -321,7 +344,7 @@ export const handleSlackBlockAction = async (
       products: actionable,
       page,
     });
-    await postResponseUrl(responseUrl, {
+    await publishPickerMessage({
       replace_original: true,
       text: picker.text,
       blocks: picker.blocks,

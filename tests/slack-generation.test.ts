@@ -116,6 +116,12 @@ const blockActionPayload = (params: {
 const baseDeps = () => {
   const seen = new Set<string>();
   const responsePosts: SlackInteractionResponse[] = [];
+  const messageUpdates: Array<{
+    channel: string;
+    ts: string;
+    text: string;
+    blocks?: unknown;
+  }> = [];
   const deps = {
     getImportById: async () => sampleImportRow(),
     listActionableProductsForImport: () => sampleSummary().actionableProducts,
@@ -141,11 +147,19 @@ const baseDeps = () => {
     postResponseUrl: async (_url: string, body: SlackInteractionResponse) => {
       responsePosts.push(body);
     },
+    updateMessage: async (params: {
+      channel: string;
+      ts: string;
+      text: string;
+      blocks?: unknown;
+    }) => {
+      messageUpdates.push(params);
+    },
     appUrl: "https://studio-shots.example",
     isAllowedTeam: (teamId: string) => teamId === "T_ALLOWED",
     isAllowedChannel: (channelId: string) => channelId === "C_ALLOWED",
   };
-  return { deps, responsePosts };
+  return { deps, responsePosts, messageUpdates };
 };
 
 test("import preview Block Kit includes Generate, Choose product, and Campaign overview", async () => {
@@ -677,11 +691,34 @@ test("choose action opens a paginated product picker", async () => {
   assert.ok(result.background);
   await result.background!();
 
-  const delivered = ctx.responsePosts.find((post) => post.replace_original === true);
-  assert.ok(delivered);
-  assert.match(delivered.text ?? "", /Choose a product to generate/);
-  assert.match(JSON.stringify(delivered.blocks), /SS-001 · high/);
-  assert.match(JSON.stringify(delivered.blocks), /SS-002 · normal/);
+  assert.equal(ctx.messageUpdates.length, 1);
+  assert.match(ctx.messageUpdates[0]?.text ?? "", /Choose a product to generate/);
+  assert.match(JSON.stringify(ctx.messageUpdates[0]?.blocks), /SS-001 · high/);
+  assert.match(JSON.stringify(ctx.messageUpdates[0]?.blocks), /SS-002 · normal/);
+});
+
+test("choose action still opens the picker when response_url 404s", async () => {
+  const { handleSlackBlockAction } = await import("@/lib/slack-actions");
+  const { SLACK_ACTION_IDS } = await import("@/lib/slack-blocks");
+  const ctx = baseDeps();
+  ctx.deps.postResponseUrl = async () => {
+    throw new Error("Slack response_url HTTP 404");
+  };
+
+  const result = await handleSlackBlockAction(
+    blockActionPayload({
+      actionId: SLACK_ACTION_IDS.choose,
+      value: "import-aaa",
+      triggerId: "trig-choose-404",
+    }),
+    ctx.deps,
+  );
+  assert.ok(result.background);
+  await result.background!();
+
+  assert.equal(ctx.messageUpdates.length, 1);
+  assert.match(ctx.messageUpdates[0]?.text ?? "", /Choose a product to generate/);
+  assert.equal(ctx.responsePosts.length, 0);
 });
 
 test("interactions route verifies signatures and acknowledges without awaiting handler", async () => {
