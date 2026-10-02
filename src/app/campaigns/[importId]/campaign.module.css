@@ -1,33 +1,17 @@
 .page {
   min-height: 100vh;
-  padding: 1.25rem 1.25rem 3.5rem;
+  padding: 0 0 3.5rem;
   animation: rise 700ms ease both;
 }
 
 .shell {
   width: min(1120px, 100%);
   margin: 0 auto;
+  padding: 1.25rem 1.25rem 0;
 }
 
-.brand {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.55rem;
-  margin-bottom: 1.75rem;
-  text-decoration: none;
-}
 
-.brandMark {
-  font-family: var(--font-display), Georgia, serif;
-  font-size: 1.35rem;
-  font-weight: 560;
-  letter-spacing: -0.03em;
-}
 
-.brandHint {
-  color: var(--muted);
-  font-size: 0.85rem;
-}
 
 .hero {
   display: grid;

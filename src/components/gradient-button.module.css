@@ -6,8 +6,8 @@
   padding: 0.7rem 1.35rem;
   border: 1px solid transparent;
   border-radius: 999px;
-  background: var(--ink);
-  color: #fbfaf8;
+  background: var(--button-bg);
+  color: var(--button-fg);
   text-align: center;
   text-decoration: none;
   letter-spacing: 0.01em;
@@ -25,8 +25,8 @@
 }
 
 .button:hover {
-  background: color-mix(in srgb, var(--ink) 88%, #5a4a6a);
-  color: #fff;
+  background: var(--button-bg-hover);
+  color: var(--button-fg);
   text-decoration: none;
   box-shadow: var(--shadow);
 }
@@ -37,15 +37,15 @@
 }
 
 .secondary {
-  background: rgba(255, 255, 255, 0.9);
-  color: var(--ink);
+  background: var(--button-secondary-bg);
+  color: var(--button-secondary-fg);
   border-color: var(--line);
   box-shadow: none;
 }
 
 .secondary:hover {
-  background: #fff;
-  color: var(--ink);
+  background: var(--button-secondary-bg-hover);
+  color: var(--button-secondary-fg);
   border-color: color-mix(in srgb, var(--ink) 22%, var(--line));
   box-shadow: var(--shadow-soft);
 }
@@ -53,5 +53,11 @@
 @media (prefers-reduced-motion: no-preference) {
   .button:hover {
     transform: translateY(-1px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button {
+    transition: none;
   }
 }

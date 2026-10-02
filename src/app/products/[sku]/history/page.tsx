@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { GradientButton } from "@/components/gradient-button";
+import { SiteHeader } from "@/components/site-header";
 import {
   getProductHistoryPageData,
   readCampaignImportId,
@@ -45,12 +46,8 @@ export default async function ProductHistoryPage(props: PageProps) {
 
   return (
     <main className={styles.page}>
+      <SiteHeader hint="generation history" />
       <div className={styles.shell}>
-        <Link href="/" className={styles.brand}>
-          <span className={styles.brandMark}>Studio Shots</span>
-          <span className={styles.brandHint}>generation history</span>
-        </Link>
-
         <header className={styles.historyHero}>
           <p className={styles.sku}>{data.sku}</p>
           <h1 className={styles.historyTitle}>{PRODUCT_HISTORY_TITLE}</h1>

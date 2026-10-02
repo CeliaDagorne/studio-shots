@@ -1,8 +1,7 @@
-import Link from "next/link";
-
 import { GradientButton } from "@/components/gradient-button";
 import { ProductCard, ProductCardGrid } from "@/components/product-card";
 import { ScrollReveal } from "@/components/scroll-reveal";
+import { SiteHeader } from "@/components/site-header";
 import {
   DEMO_CATALOG_PRODUCTS,
   PUBLIC_ARCHITECTURE_URL,
@@ -51,20 +50,9 @@ export default async function HomePage() {
 
   return (
     <main className={styles.page}>
-      <header className={styles.header}>
-        <div className={styles.headerInner}>
-          <Link className={styles.brand} href="/">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              className={styles.brandLogo}
-              src="/brand/studio-shots-logo.png"
-              alt=""
-              width={34}
-              height={34}
-            />
-            <span className={styles.brandName}>Studio Shots</span>
-          </Link>
-          <nav className={styles.nav} aria-label="Primary">
+      <SiteHeader
+        nav={
+          <>
             <a
               className={`${styles.navLink} ${styles.navLinkHideMobile}`}
               href={PUBLIC_GITHUB_REPO_URL}
@@ -84,9 +72,9 @@ export default async function HomePage() {
             <span className={styles.navCta}>
               <GradientButton href={demoHref}>View demo</GradientButton>
             </span>
-          </nav>
-        </div>
-      </header>
+          </>
+        }
+      />
 
       <div className={styles.shell}>
         <section className={styles.hero} aria-labelledby="home-hero-title">

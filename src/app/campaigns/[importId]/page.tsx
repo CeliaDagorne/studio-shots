@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ProductCard, ProductCardGrid } from "@/components/product-card";
+import { SiteHeader } from "@/components/site-header";
 import { getCampaignPageData } from "@/lib/campaigns";
 import {
   CAMPAIGN_METRICS_INTRO,
@@ -40,12 +40,8 @@ export default async function CampaignPage(props: PageProps) {
 
   return (
     <main className={styles.page}>
+      <SiteHeader hint="campaign overview" />
       <div className={styles.shell}>
-        <Link href="/" className={styles.brand}>
-          <span className={styles.brandMark}>Studio Shots</span>
-          <span className={styles.brandHint}>campaign overview</span>
-        </Link>
-
         <header className={styles.hero}>
           <p className={styles.eyebrow}>Campaign</p>
           <h1>Import overview</h1>

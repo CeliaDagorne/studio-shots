@@ -1,0 +1,69 @@
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  backdrop-filter: blur(14px);
+  background: var(--header-bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.inner {
+  width: min(1120px, 100%);
+  margin: 0 auto;
+  padding: 0.75rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  text-decoration: none;
+  min-width: 0;
+}
+
+.brandLogo {
+  width: 2.15rem;
+  height: 2.15rem;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.brandName {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 1.15rem;
+  font-weight: 560;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+}
+
+.brandHint {
+  color: var(--muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem 0.85rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem 0.85rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+@media (max-width: 640px) {
+  .brandHint {
+    display: none;
+  }
+}

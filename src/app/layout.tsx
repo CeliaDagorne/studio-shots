@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 import { SITE_DESCRIPTION, SITE_TITLE } from "@/lib/website-copy";
+import { THEME_BOOTSTRAP_SCRIPT } from "@/lib/theme";
 
 import "./globals.css";
 
@@ -28,7 +29,13 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={`${display.variable} ${sans.variable}`}>
+    <html lang="en" className={`${display.variable} ${sans.variable}`} suppressHydrationWarning>
+      <head>
+        <script
+          // Runs before paint so the first frame matches stored / system preference.
+          dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }}
+        />
+      </head>
       <body>
         {children}
         <Analytics />

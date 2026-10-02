@@ -9,58 +9,6 @@
   padding: 0 1.25rem;
 }
 
-/* ——— Header ——— */
-
-.header {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  backdrop-filter: blur(14px);
-  background: color-mix(in srgb, var(--paper) 82%, transparent);
-  border-bottom: 1px solid var(--line);
-}
-
-.headerInner {
-  width: min(1120px, 100%);
-  margin: 0 auto;
-  padding: 0.75rem 1.25rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.65rem;
-  text-decoration: none;
-  min-width: 0;
-}
-
-.brandLogo {
-  width: 2.15rem;
-  height: 2.15rem;
-  flex-shrink: 0;
-  object-fit: contain;
-}
-
-.brandName {
-  font-family: var(--font-display), Georgia, serif;
-  font-size: 1.15rem;
-  font-weight: 560;
-  letter-spacing: -0.03em;
-  white-space: nowrap;
-}
-
-.nav {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem 0.85rem;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
 .navLink {
   color: var(--muted);
   text-decoration: none;
@@ -171,7 +119,7 @@
   border-radius: 1.15rem;
   overflow: hidden;
   border: 1px solid var(--line);
-  background: #fff;
+  background: var(--surface-elevated);
   box-shadow: var(--shadow);
   z-index: 1;
 }
@@ -191,7 +139,7 @@
   border-radius: 0.85rem;
   overflow: hidden;
   border: 1px solid var(--line);
-  background: #fff;
+  background: var(--surface-elevated);
   box-shadow: var(--shadow-soft);
   z-index: 2;
   transform: rotate(3deg);
@@ -212,7 +160,7 @@
   padding: 0.75rem 0.8rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--surface);
   box-shadow: var(--shadow);
 }
 
@@ -258,12 +206,12 @@
 
 .approve {
   background: var(--ink);
-  color: #fbfaf8;
+  color: var(--on-accent);
   border-color: transparent;
 }
 
 .reject {
-  background: #fff;
+  background: var(--surface-elevated);
   color: var(--ink);
 }
 
@@ -275,7 +223,7 @@
   padding: 0.45rem 0.7rem;
   border-radius: 999px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--surface);
   box-shadow: var(--shadow-soft);
   font-size: 0.75rem;
   font-weight: 560;
@@ -369,8 +317,8 @@
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
   background:
-    linear-gradient(160deg, rgba(248, 238, 220, 0.55), transparent 55%),
-    linear-gradient(20deg, rgba(220, 204, 240, 0.35), transparent 50%), #fff;
+    linear-gradient(160deg, var(--mock-wash-a), transparent 55%),
+    linear-gradient(20deg, var(--mock-wash-b), transparent 50%), var(--surface-elevated);
   overflow: hidden;
 }
 
@@ -383,7 +331,7 @@
 .mockLine {
   height: 0.45rem;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--ink) 10%, transparent);
+  background: var(--mock-chip-fill);
 }
 
 .mockLineWide {
@@ -409,11 +357,11 @@
   flex: 1;
   border-radius: 0.4rem;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--surface);
 }
 
 .mockChipAccent {
-  background: color-mix(in srgb, var(--periwinkle) 45%, #fff);
+  background: var(--mock-chip-accent);
 }
 
 .mockThumbRow {
@@ -427,11 +375,11 @@
   aspect-ratio: 1;
   border-radius: 0.35rem;
   border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--blush) 35%, #fff);
+  background: var(--mock-thumb);
 }
 
 .mockThumbApproved {
-  background: color-mix(in srgb, var(--lavender) 40%, #fff);
+  background: var(--mock-thumb-approved);
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ink) 18%, transparent);
 }
 
@@ -471,7 +419,7 @@
 .slackPreview {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: #fff;
+  background: var(--surface-elevated);
   box-shadow: var(--shadow);
   overflow: hidden;
 }
@@ -482,14 +430,14 @@
   gap: 0.55rem;
   padding: 0.75rem 0.9rem;
   border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--paper) 70%, #fff);
+  background: var(--slack-header-bg);
 }
 
 .slackDot {
   width: 0.55rem;
   height: 0.55rem;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--periwinkle) 70%, var(--ink));
+  background: var(--slack-dot);
 }
 
 .slackHeader strong {
@@ -560,12 +508,12 @@
   font-size: 0.72rem;
   font-weight: 560;
   border: 1px solid var(--line);
-  background: #fff;
+  background: var(--surface-elevated);
 }
 
 .slackCandidateActions span:first-child {
   background: var(--ink);
-  color: #fbfaf8;
+  color: var(--on-accent);
   border-color: transparent;
 }
 
@@ -604,7 +552,7 @@
   padding: 0.7rem 0.8rem;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: #fff;
+  background: var(--surface-elevated);
 }
 
 .campaignMetrics span {
@@ -633,8 +581,8 @@
   border: 1px solid var(--line);
   border-radius: calc(var(--radius) + 0.15rem);
   background:
-    linear-gradient(135deg, rgba(248, 238, 220, 0.45), transparent 45%),
-    linear-gradient(320deg, rgba(200, 212, 244, 0.28), transparent 40%), #fff;
+    linear-gradient(135deg, var(--final-cta-wash-a), transparent 45%),
+    linear-gradient(320deg, var(--final-cta-wash-b), transparent 40%), var(--surface-elevated);
   box-shadow: var(--shadow-soft);
   text-align: center;
   justify-items: center;

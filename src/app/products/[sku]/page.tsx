@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { GradientButton } from "@/components/gradient-button";
+import { SiteHeader } from "@/components/site-header";
 import {
   formatPriceCents,
   getProductPageData,
@@ -54,12 +55,8 @@ export default async function ProductPage(props: PageProps) {
 
   return (
     <main className={styles.page}>
+      <SiteHeader hint="styled catalog" />
       <div className={styles.shell}>
-        <Link href="/" className={styles.brand}>
-          <span className={styles.brandMark}>Studio Shots</span>
-          <span className={styles.brandHint}>styled catalog</span>
-        </Link>
-
         <section className={styles.hero} aria-label="Product overview">
           <div className={styles.heroMedia}>
             {/* eslint-disable-next-line @next/next/no-img-element */}

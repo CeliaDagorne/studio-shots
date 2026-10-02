@@ -1,10 +1,13 @@
 import Link from "next/link";
 
+import { SiteHeader } from "@/components/site-header";
+
 import styles from "./not-found.module.css";
 
 export default function CampaignNotFound() {
   return (
     <main className={styles.page}>
+      <SiteHeader />
       <div className={styles.panel}>
         <p className={styles.eyebrow}>Studio Shots</p>
         <h1>Campaign not found</h1>

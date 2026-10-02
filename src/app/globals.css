@@ -1,22 +1,99 @@
 :root {
+  color-scheme: light;
+
   --ink: #22182c;
   --muted: #746b7c;
   --text-subtle: #8a8294;
   --paper: #faf9f7;
   --paper-deep: #f3f0eb;
   --panel: rgba(255, 255, 255, 0.82);
+  --surface: rgba(255, 255, 255, 0.94);
+  --surface-elevated: #ffffff;
   --line: rgba(34, 24, 44, 0.1);
   --accent: #22182c;
+  --accent-hover: #3a2f46;
   --accent-soft: #dcccf0;
   --lavender: #dcccf0;
   --periwinkle: #c8d4f4;
   --blush: #f4d5e4;
   --pearl: #f8eedc;
+  --on-accent: #fbfaf8;
+  --button-bg: #22182c;
+  --button-bg-hover: color-mix(in srgb, #22182c 88%, #5a4a6a);
+  --button-fg: #fbfaf8;
+  --button-secondary-bg: rgba(255, 255, 255, 0.9);
+  --button-secondary-bg-hover: #ffffff;
+  --button-secondary-fg: #22182c;
+  --success: #2f6f4e;
+  --warning: #8a6a2a;
+  --error: #b42318;
   --shadow: 0 18px 44px rgba(34, 24, 44, 0.08);
   --shadow-soft: 0 10px 28px rgba(34, 24, 44, 0.06);
   --radius: 1rem;
   --radius-sm: 0.65rem;
   --focus-ring: 2px solid var(--ink);
+  --header-bg: color-mix(in srgb, var(--paper) 82%, transparent);
+  --page-glow-a: rgba(220, 204, 240, 0.28);
+  --page-glow-b: rgba(200, 212, 244, 0.22);
+  --page-glow-c: rgba(244, 213, 228, 0.18);
+  --mock-wash-a: rgba(248, 238, 220, 0.55);
+  --mock-wash-b: rgba(220, 204, 240, 0.35);
+  --mock-chip-fill: color-mix(in srgb, var(--ink) 10%, transparent);
+  --mock-chip-accent: color-mix(in srgb, var(--periwinkle) 45%, var(--surface-elevated));
+  --mock-thumb: color-mix(in srgb, var(--blush) 35%, var(--surface-elevated));
+  --mock-thumb-approved: color-mix(in srgb, var(--lavender) 40%, var(--surface-elevated));
+  --slack-header-bg: color-mix(in srgb, var(--paper) 70%, var(--surface-elevated));
+  --slack-dot: color-mix(in srgb, var(--periwinkle) 70%, var(--ink));
+  --final-cta-wash-a: rgba(248, 238, 220, 0.45);
+  --final-cta-wash-b: rgba(200, 212, 244, 0.28);
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+
+  --ink: #f7f3f8;
+  --muted: #b8aebe;
+  --text-subtle: #a398ad;
+  --paper: #121015;
+  --paper-deep: #0d0c10;
+  --panel: #1b181f;
+  --surface: #1b181f;
+  --surface-elevated: #242029;
+  --line: rgba(255, 255, 255, 0.11);
+  --accent: #cdb9e8;
+  --accent-hover: #ddccef;
+  --accent-soft: rgba(205, 185, 232, 0.22);
+  --lavender: #cdb9e8;
+  --periwinkle: #c8d4f4;
+  --blush: rgba(244, 213, 228, 0.18);
+  --pearl: rgba(248, 238, 220, 0.14);
+  --on-accent: #121015;
+  --button-bg: #cdb9e8;
+  --button-bg-hover: #ddccef;
+  --button-fg: #121015;
+  --button-secondary-bg: #1b181f;
+  --button-secondary-bg-hover: #242029;
+  --button-secondary-fg: #f7f3f8;
+  --success: #8fd6ad;
+  --warning: #e6c17a;
+  --error: #ee9a9a;
+  --shadow: 0 0 0 1px rgba(255, 255, 255, 0.11);
+  --shadow-soft: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --focus-ring: 2px solid var(--accent);
+  --header-bg: color-mix(in srgb, var(--paper) 88%, transparent);
+  --page-glow-a: rgba(205, 185, 232, 0.07);
+  --page-glow-b: rgba(200, 212, 244, 0.05);
+  --page-glow-c: rgba(244, 213, 228, 0.04);
+  --mock-wash-a: rgba(248, 238, 220, 0.06);
+  --mock-wash-b: rgba(205, 185, 232, 0.08);
+  --mock-chip-fill: rgba(255, 255, 255, 0.08);
+  --mock-chip-accent: color-mix(in srgb, var(--periwinkle) 28%, var(--surface-elevated));
+  --mock-thumb: color-mix(in srgb, var(--blush) 55%, var(--surface-elevated));
+  --mock-thumb-approved: color-mix(in srgb, var(--lavender) 30%, var(--surface-elevated));
+  --slack-header-bg: color-mix(in srgb, var(--paper-deep) 55%, var(--surface-elevated));
+  --slack-dot: color-mix(in srgb, var(--periwinkle) 55%, var(--accent));
+  --final-cta-wash-a: rgba(248, 238, 220, 0.05);
+  --final-cta-wash-b: rgba(200, 212, 244, 0.06);
 }
 
 * {
@@ -33,9 +110,9 @@ body {
   color: var(--ink);
   font-family: var(--font-sans), "Avenir Next", sans-serif;
   background:
-    radial-gradient(ellipse 55% 40% at 8% 0%, rgba(220, 204, 240, 0.28), transparent 70%),
-    radial-gradient(ellipse 45% 35% at 96% 4%, rgba(200, 212, 244, 0.22), transparent 65%),
-    radial-gradient(ellipse 40% 30% at 70% 18%, rgba(244, 213, 228, 0.18), transparent 60%),
+    radial-gradient(ellipse 55% 40% at 8% 0%, var(--page-glow-a), transparent 70%),
+    radial-gradient(ellipse 45% 35% at 96% 4%, var(--page-glow-b), transparent 65%),
+    radial-gradient(ellipse 40% 30% at 70% 18%, var(--page-glow-c), transparent 60%),
     var(--paper);
 }
 
