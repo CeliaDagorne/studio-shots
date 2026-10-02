@@ -157,6 +157,48 @@ export const buildCandidateInsertValues = (params: {
   });
 
 /**
+ * Insert candidate rows. When the attempts schema is missing, use SQL that does not
+ * mention generation_attempt_id — drizzle's table insert always emits that column
+ * (as DEFAULT) even if the value is omitted, which 42703s on pre-migration DBs.
+ */
+export const insertCandidateRows = async (
+  rows: CandidateInsertValues[],
+  options: { linkAttemptId: boolean },
+): Promise<void> => {
+  const db = getDb();
+  if (options.linkAttemptId) {
+    for (const row of rows) {
+      await db.insert(generationCandidates).values(row);
+    }
+    return;
+  }
+
+  for (const row of rows) {
+    await db.execute(sql`
+      insert into generation_candidates (
+        id,
+        shot_request_id,
+        product_sku,
+        candidate_index,
+        status,
+        prompt,
+        platform,
+        conversation_id
+      ) values (
+        ${row.id},
+        ${row.shotRequestId},
+        ${row.productSku},
+        ${row.candidateIndex},
+        ${row.status},
+        ${row.prompt},
+        ${row.platform},
+        ${row.conversationId}
+      )
+    `);
+  }
+};
+
+/**
  * Atomically claim a request for generation/retry/regenerate.
  * Only one concurrent claim succeeds — duplicate Retry clicks are idempotent.
  */
@@ -748,9 +790,9 @@ export const runShotRequestGeneration = async (params: {
       linkedToAttempt: Boolean(attemptRowId),
     });
 
-    for (const row of candidateRows) {
-      await db.insert(generationCandidates).values(row);
-    }
+    await insertCandidateRows(candidateRows, {
+      linkAttemptId: Boolean(attemptRowId),
+    });
 
     if (params.conversation.platform !== CHAT_PLATFORM.slack) {
       await notifyConversation(

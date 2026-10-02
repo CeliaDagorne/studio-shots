@@ -84,9 +84,17 @@ test("regression: missing attempts schema must not be treated as a Luma generati
   // Production (ep-red-voice) after history deploy, migration 0005 not applied:
   // - SS-004 bffc96dc… → failed 2026-10-02T17:00Z with 0 candidates (never reached Luma)
   // - SS-002 a39d8b79… → failed 2026-10-02T18:08Z with only Sept 29 candidates (no new attempt)
-  // Root cause: insert into generation_attempts threw; catch marked the request failed.
+  // Root cause 1: insert into generation_attempts threw; catch marked the request failed.
+  // Root cause 2 (after soft-skip): drizzle candidate insert still emits generation_attempt_id
+  // as DEFAULT because the column is on the schema, which 42703s when the column is absent.
   const schemaError = new Error('relation "generation_attempts" does not exist');
   assert.equal(isMissingGenerationAttemptsSchemaError(schemaError), true);
+  assert.equal(
+    isMissingGenerationAttemptsSchemaError(
+      new Error('column "generation_attempt_id" of relation "generation_candidates" does not exist'),
+    ),
+    true,
+  );
 
   const rows = buildCandidateInsertValues({
     shotRequestId: "bffc96dc-e183-f923-8a57-5f1306654875",
@@ -98,8 +106,9 @@ test("regression: missing attempts schema must not be treated as a Luma generati
     attemptId: null,
   });
 
-  // After skipping attempt persistence, candidate rows are still insertable on
-  // the pre-migration schema (no generation_attempt_id column).
+  // After skipping attempt persistence, candidate rows must be insertable via the
+  // pre-migration SQL path (insertCandidateRows with linkAttemptId:false) that does
+  // not mention generation_attempt_id.
   assert.equal(rows.length, 3);
   assert.ok(rows.every((row) => !("generationAttemptId" in row)));
   assert.ok(rows.every((row) => row.productSku === "SS-004"));
