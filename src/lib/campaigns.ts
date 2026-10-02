@@ -3,7 +3,7 @@ import { desc, eq, inArray, notInArray } from "drizzle-orm";
 import { parseImportWarningsPayload } from "@/lib/import-meta";
 import { getDb } from "@/lib/db";
 import { env } from "@/lib/env";
-import { buildProductPagePath, buildProductPageUrl } from "@/lib/products";
+import { buildProductPagePath, buildProductPageUrl, countApprovedGalleryImages } from "@/lib/products";
 import { WORKFLOW } from "@/lib/review";
 import { aggregateStudioStatus, type StudioStatusSummary } from "@/lib/status";
 import { generationCandidates, imports, products, shotRequests } from "@/lib/schema";
@@ -262,6 +262,7 @@ export const assembleCampaignPageData = (params: {
     productSku: string;
     status: string;
     reviewDecision: string | null;
+    blobUrl: string | null;
     lumaGenerationId: string | null;
   }>;
   prioritiesBySku: Map<string, CatalogPriority>;
@@ -278,12 +279,14 @@ export const assembleCampaignPageData = (params: {
   });
 
   const approvedCountBySku = new Map<string, number>();
+  const candidatesBySku = new Map<string, typeof params.candidates>();
   for (const candidate of params.candidates) {
-    if (candidate.reviewDecision !== "approved") continue;
-    approvedCountBySku.set(
-      candidate.productSku,
-      (approvedCountBySku.get(candidate.productSku) ?? 0) + 1,
-    );
+    const list = candidatesBySku.get(candidate.productSku) ?? [];
+    list.push(candidate);
+    candidatesBySku.set(candidate.productSku, list);
+  }
+  for (const [sku, rows] of candidatesBySku) {
+    approvedCountBySku.set(sku, countApprovedGalleryImages(rows));
   }
 
   return {
@@ -421,6 +424,7 @@ export const getCampaignPageData = async (
             productSku: generationCandidates.productSku,
             status: generationCandidates.status,
             reviewDecision: generationCandidates.reviewDecision,
+            blobUrl: generationCandidates.blobUrl,
             lumaGenerationId: generationCandidates.lumaGenerationId,
           })
           .from(generationCandidates)

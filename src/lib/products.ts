@@ -7,6 +7,7 @@ import {
   planAttemptBackfillForRequest,
   type PlannedAttempt,
 } from "@/lib/generation-attempts";
+import { parseImportWarningsPayload } from "@/lib/import-meta";
 import {
   CANDIDATE_STATUS,
   MIN_APPROVALS_TO_COMPLETE,
@@ -177,6 +178,15 @@ export const toApprovedCandidateView = (candidate: {
   blobPath: candidate.blobPath,
 });
 
+export const isApprovedGalleryCandidate = (candidate: {
+  status: string;
+  reviewDecision: string | null;
+  blobUrl: string | null;
+}): boolean =>
+  candidate.status === CANDIDATE_STATUS.ready &&
+  candidate.reviewDecision === REVIEW_DECISION.approved &&
+  Boolean(candidate.blobUrl);
+
 export const filterApprovedCandidates = <
   T extends {
     status: string;
@@ -190,12 +200,7 @@ export const filterApprovedCandidates = <
   candidates: T[],
 ): ApprovedCandidateView[] =>
   candidates
-    .filter(
-      (candidate) =>
-        candidate.status === CANDIDATE_STATUS.ready &&
-        candidate.reviewDecision === REVIEW_DECISION.approved &&
-        Boolean(candidate.blobUrl),
-    )
+    .filter(isApprovedGalleryCandidate)
     .sort((a, b) => a.candidateIndex - b.candidateIndex)
     .map((candidate) =>
       toApprovedCandidateView({
@@ -205,6 +210,18 @@ export const filterApprovedCandidates = <
         blobPath: candidate.blobPath,
       }),
     );
+
+/**
+ * Shared approved-image count used by campaign cards and product pages.
+ * Requires ready + approved + blob-backed — never depends on generation_attempt_id.
+ */
+export const countApprovedGalleryImages = (
+  candidates: Array<{
+    status: string;
+    reviewDecision: string | null;
+    blobUrl: string | null;
+  }>,
+): number => candidates.filter(isApprovedGalleryCandidate).length;
 
 /**
  * Group approved candidates into attempts (newest first).
@@ -621,7 +638,7 @@ const loadScopedRequest = async (params: {
   importId: string;
 }) => {
   const db = getDb();
-  const rows = await db
+  const owned = await db
     .select({
       id: shotRequests.id,
       shotIdea: shotRequests.shotIdea,
@@ -637,7 +654,42 @@ const loadScopedRequest = async (params: {
     )
     .orderBy(desc(shotRequests.updatedAt))
     .limit(1);
-  return rows[0] ?? null;
+  if (owned[0]) {
+    return owned[0];
+  }
+
+  // Campaign overviews may surface a SKU via catalogProducts.requestId even when
+  // that shot request row is owned by an earlier import (unchanged hash). Follow
+  // the same linkage so product/history pages match the campaign card.
+  const importRows = await db
+    .select({ warnings: imports.warnings })
+    .from(imports)
+    .where(eq(imports.id, params.importId))
+    .limit(1);
+  const payload = parseImportWarningsPayload(importRows[0]?.warnings);
+  const linkedOptions = [
+    ...(payload.catalogProducts ?? []),
+    ...payload.actionable,
+  ];
+  const linkedRequestId = linkedOptions.find((option) => option.sku === params.sku)
+    ?.requestId;
+  if (!linkedRequestId) {
+    return null;
+  }
+
+  const linked = await db
+    .select({
+      id: shotRequests.id,
+      shotIdea: shotRequests.shotIdea,
+      workflowStatus: shotRequests.workflowStatus,
+      approvedCount: shotRequests.approvedCount,
+    })
+    .from(shotRequests)
+    .where(
+      and(eq(shotRequests.id, linkedRequestId), eq(shotRequests.productSku, params.sku)),
+    )
+    .limit(1);
+  return linked[0] ?? null;
 };
 
 const emptyProductPageData = (product: {
@@ -701,32 +753,83 @@ export const getProductPageData = async (
     };
   }
 
-  const candidateRows = await db
-    .select({
-      id: generationCandidates.id,
-      candidateIndex: generationCandidates.candidateIndex,
-      status: generationCandidates.status,
-      reviewDecision: generationCandidates.reviewDecision,
-      blobUrl: generationCandidates.blobUrl,
-      blobPath: generationCandidates.blobPath,
-    })
-    .from(generationCandidates)
-    .where(
-      and(
-        eq(generationCandidates.shotRequestId, request.id),
-        eq(generationCandidates.productSku, sku),
-      ),
-    )
-    .orderBy(asc(generationCandidates.candidateIndex));
+  let candidateRows: Array<{
+    id: string;
+    generationAttemptId: string | null;
+    candidateIndex: number;
+    status: string;
+    reviewDecision: string | null;
+    blobUrl: string | null;
+    blobPath: string | null;
+    errorMessage: string | null;
+    lumaGenerationId: string | null;
+    externalMessageId: string | null;
+    createdAt: Date;
+  }>;
 
-  const approvedCandidates = excludeForeignSkuDemoUrls(
+  try {
+    candidateRows = await db
+      .select({
+        id: generationCandidates.id,
+        generationAttemptId: generationCandidates.generationAttemptId,
+        candidateIndex: generationCandidates.candidateIndex,
+        status: generationCandidates.status,
+        reviewDecision: generationCandidates.reviewDecision,
+        blobUrl: generationCandidates.blobUrl,
+        blobPath: generationCandidates.blobPath,
+        errorMessage: generationCandidates.errorMessage,
+        lumaGenerationId: generationCandidates.lumaGenerationId,
+        externalMessageId: generationCandidates.externalMessageId,
+        createdAt: generationCandidates.createdAt,
+      })
+      .from(generationCandidates)
+      .where(
+        and(
+          eq(generationCandidates.shotRequestId, request.id),
+          eq(generationCandidates.productSku, sku),
+        ),
+      )
+      .orderBy(asc(generationCandidates.candidateIndex));
+  } catch {
+    // Pre-migration schemas may lack generation_attempt_id.
+    const withoutAttemptId = await db
+      .select({
+        id: generationCandidates.id,
+        candidateIndex: generationCandidates.candidateIndex,
+        status: generationCandidates.status,
+        reviewDecision: generationCandidates.reviewDecision,
+        blobUrl: generationCandidates.blobUrl,
+        blobPath: generationCandidates.blobPath,
+        errorMessage: generationCandidates.errorMessage,
+        lumaGenerationId: generationCandidates.lumaGenerationId,
+        externalMessageId: generationCandidates.externalMessageId,
+        createdAt: generationCandidates.createdAt,
+      })
+      .from(generationCandidates)
+      .where(
+        and(
+          eq(generationCandidates.shotRequestId, request.id),
+          eq(generationCandidates.productSku, sku),
+        ),
+      )
+      .orderBy(asc(generationCandidates.candidateIndex));
+    candidateRows = withoutAttemptId.map((row) => ({
+      ...row,
+      generationAttemptId: null,
+    }));
+  }
+
+  const scopedCandidates = excludeForeignSkuDemoUrls(sku, candidateRows);
+  // Approved gallery never depends on generation_attempt_id (may be null pre-backfill).
+  const approvedCandidates = filterApprovedCandidates(scopedCandidates);
+
+  const historyAttempts = await buildHistoryAttemptsForRequest({
+    shotRequestId: request.id,
+    shotIdea: request.shotIdea,
+    productPhotoUrl: product.photoUrl,
     sku,
-    filterApprovedCandidates(candidateRows),
-  );
-
-  const attemptNumbers = new Set(
-    candidateRows.map((candidate) => generationAttemptNumber(candidate.candidateIndex)),
-  );
+    candidates: scopedCandidates,
+  });
 
   return {
     sku: product.sku,
@@ -741,7 +844,7 @@ export const getProductPageData = async (
     workflowStatusLabel: formatProductWorkflowStatusLabel(request.workflowStatus),
     requestId: request.id,
     approvedCandidates,
-    generationAttemptCount: attemptNumbers.size,
+    generationAttemptCount: historyAttempts.length,
     campaignPagePath,
     historyPagePath,
     productPagePath,
@@ -799,58 +902,77 @@ export const getProductHistoryPageData = async (
     };
   }
 
-  const candidateRows = await db
-    .select({
-      id: generationCandidates.id,
-      generationAttemptId: generationCandidates.generationAttemptId,
-      candidateIndex: generationCandidates.candidateIndex,
-      status: generationCandidates.status,
-      reviewDecision: generationCandidates.reviewDecision,
-      blobUrl: generationCandidates.blobUrl,
-      errorMessage: generationCandidates.errorMessage,
-      lumaGenerationId: generationCandidates.lumaGenerationId,
-      externalMessageId: generationCandidates.externalMessageId,
-      createdAt: generationCandidates.createdAt,
-    })
-    .from(generationCandidates)
-    .where(
-      and(
-        eq(generationCandidates.shotRequestId, request.id),
-        eq(generationCandidates.productSku, sku),
-      ),
-    )
-    .orderBy(asc(generationCandidates.candidateIndex));
+  let candidateRows: Array<{
+    id: string;
+    generationAttemptId: string | null;
+    candidateIndex: number;
+    status: string;
+    reviewDecision: string | null;
+    blobUrl: string | null;
+    errorMessage: string | null;
+    lumaGenerationId: string | null;
+    externalMessageId: string | null;
+    createdAt: Date;
+  }>;
+
+  try {
+    candidateRows = await db
+      .select({
+        id: generationCandidates.id,
+        generationAttemptId: generationCandidates.generationAttemptId,
+        candidateIndex: generationCandidates.candidateIndex,
+        status: generationCandidates.status,
+        reviewDecision: generationCandidates.reviewDecision,
+        blobUrl: generationCandidates.blobUrl,
+        errorMessage: generationCandidates.errorMessage,
+        lumaGenerationId: generationCandidates.lumaGenerationId,
+        externalMessageId: generationCandidates.externalMessageId,
+        createdAt: generationCandidates.createdAt,
+      })
+      .from(generationCandidates)
+      .where(
+        and(
+          eq(generationCandidates.shotRequestId, request.id),
+          eq(generationCandidates.productSku, sku),
+        ),
+      )
+      .orderBy(asc(generationCandidates.candidateIndex));
+  } catch {
+    const withoutAttemptId = await db
+      .select({
+        id: generationCandidates.id,
+        candidateIndex: generationCandidates.candidateIndex,
+        status: generationCandidates.status,
+        reviewDecision: generationCandidates.reviewDecision,
+        blobUrl: generationCandidates.blobUrl,
+        errorMessage: generationCandidates.errorMessage,
+        lumaGenerationId: generationCandidates.lumaGenerationId,
+        externalMessageId: generationCandidates.externalMessageId,
+        createdAt: generationCandidates.createdAt,
+      })
+      .from(generationCandidates)
+      .where(
+        and(
+          eq(generationCandidates.shotRequestId, request.id),
+          eq(generationCandidates.productSku, sku),
+        ),
+      )
+      .orderBy(asc(generationCandidates.candidateIndex));
+    candidateRows = withoutAttemptId.map((row) => ({
+      ...row,
+      generationAttemptId: null,
+    }));
+  }
 
   const scopedCandidates = excludeForeignSkuDemoUrls(sku, candidateRows);
 
-  const storedAttempts = await db
-    .select({
-      id: generationAttempts.id,
-      attemptNumber: generationAttempts.attemptNumber,
-      isLegacy: generationAttempts.isLegacy,
-      shotIdea: generationAttempts.shotIdea,
-      aspectRatio: generationAttempts.aspectRatio,
-      environment: generationAttempts.environment,
-      status: generationAttempts.status,
-      errorMessage: generationAttempts.errorMessage,
-      createdAt: generationAttempts.createdAt,
-    })
-    .from(generationAttempts)
-    .where(eq(generationAttempts.shotRequestId, request.id))
-    .orderBy(desc(generationAttempts.createdAt));
-
-  const attempts =
-    storedAttempts.length > 0
-      ? historyViewsFromStoredAttempts({
-          attempts: storedAttempts,
-          productPhotoUrl: product.photoUrl,
-          candidates: scopedCandidates,
-        })
-      : groupHistoryCandidatesByAttempt({
-          productPhotoUrl: product.photoUrl,
-          shotIdea: request.shotIdea,
-          candidates: scopedCandidates,
-        });
+  const attempts = await buildHistoryAttemptsForRequest({
+    shotRequestId: request.id,
+    shotIdea: request.shotIdea,
+    productPhotoUrl: product.photoUrl,
+    sku,
+    candidates: scopedCandidates,
+  });
 
   return {
     sku: product.sku,
@@ -866,4 +988,178 @@ export const getProductHistoryPageData = async (
     productPagePath,
     scopedImportId,
   };
+};
+
+const buildHistoryAttemptsForRequest = async (params: {
+  shotRequestId: string;
+  shotIdea: string;
+  productPhotoUrl: string;
+  sku: string;
+  candidates: Array<{
+    id: string;
+    generationAttemptId: string | null;
+    candidateIndex: number;
+    status: string;
+    reviewDecision: string | null;
+    blobUrl: string | null;
+    errorMessage: string | null;
+    lumaGenerationId: string | null;
+    externalMessageId: string | null;
+    createdAt: Date;
+  }>;
+}): Promise<HistoryAttemptView[]> => {
+  const db = getDb();
+  let storedAttempts: Array<{
+    id: string;
+    attemptNumber: number | null;
+    isLegacy: boolean;
+    shotIdea: string;
+    aspectRatio: string;
+    environment: string | null;
+    status: string;
+    errorMessage: string | null;
+    createdAt: Date;
+  }> = [];
+
+  try {
+    storedAttempts = await db
+      .select({
+        id: generationAttempts.id,
+        attemptNumber: generationAttempts.attemptNumber,
+        isLegacy: generationAttempts.isLegacy,
+        shotIdea: generationAttempts.shotIdea,
+        aspectRatio: generationAttempts.aspectRatio,
+        environment: generationAttempts.environment,
+        status: generationAttempts.status,
+        errorMessage: generationAttempts.errorMessage,
+        createdAt: generationAttempts.createdAt,
+      })
+      .from(generationAttempts)
+      .where(eq(generationAttempts.shotRequestId, params.shotRequestId))
+      .orderBy(desc(generationAttempts.createdAt));
+  } catch {
+    // Pre-migration databases have no generation_attempts table yet.
+    storedAttempts = [];
+  }
+
+  return historyViewsIncludingLegacyUnlinked({
+    storedAttempts,
+    productPhotoUrl: params.productPhotoUrl,
+    shotRequestId: params.shotRequestId,
+    sku: params.sku,
+    shotIdea: params.shotIdea,
+    candidates: params.candidates,
+  });
+};
+
+/**
+ * History UI: linked attempt rows first; any candidates with null
+ * generation_attempt_id are grouped under "Legacy generation" so pre-migration
+ * approvals remain visible and the CTA never reports 0 attempts when they exist.
+ */
+export const historyViewsIncludingLegacyUnlinked = (params: {
+  storedAttempts: Array<{
+    id: string;
+    attemptNumber: number | null;
+    isLegacy: boolean;
+    shotIdea: string;
+    aspectRatio: string;
+    environment: string | null;
+    status: string;
+    errorMessage: string | null;
+    createdAt: Date;
+  }>;
+  productPhotoUrl: string;
+  shotRequestId: string;
+  sku: string;
+  shotIdea: string;
+  candidates: Array<{
+    id: string;
+    generationAttemptId: string | null;
+    candidateIndex: number;
+    status: string;
+    reviewDecision: string | null;
+    blobUrl: string | null;
+    errorMessage: string | null;
+    lumaGenerationId: string | null;
+    externalMessageId: string | null;
+    createdAt: Date;
+  }>;
+}): HistoryAttemptView[] => {
+  const unlinked = params.candidates.filter((candidate) => !candidate.generationAttemptId);
+
+  if (params.storedAttempts.length === 0) {
+    if (unlinked.length === 0) {
+      return [];
+    }
+    return plannedAttemptsToHistoryViews({
+      planned: [
+        {
+          id: `legacy:${params.shotRequestId}`,
+          shotRequestId: params.shotRequestId,
+          productSku: params.sku,
+          attemptNumber: null,
+          isLegacy: true,
+          label: formatGenerationAttemptLabel({ attemptNumber: null, isLegacy: true }),
+          shotIdea: params.shotIdea,
+          aspectRatio: MVP_ASPECT_RATIO,
+          environment: inferAttemptEnvironment({
+            productPhotoUrl: params.productPhotoUrl,
+            candidates: unlinked,
+          }),
+          status: deriveAttemptStatus(unlinked),
+          errorMessage:
+            unlinked.map((row) => row.errorMessage).find((message) => Boolean(message)) ??
+            null,
+          createdAt: unlinked.reduce(
+            (earliest, row) => (row.createdAt < earliest ? row.createdAt : earliest),
+            unlinked[0]!.createdAt,
+          ),
+          candidateIds: [...unlinked]
+            .sort((a, b) => a.candidateIndex - b.candidateIndex)
+            .map((row) => row.id),
+        },
+      ],
+      productPhotoUrl: params.productPhotoUrl,
+      candidates: unlinked,
+    });
+  }
+
+  const linkedViews = historyViewsFromStoredAttempts({
+    attempts: params.storedAttempts,
+    productPhotoUrl: params.productPhotoUrl,
+    candidates: params.candidates,
+  });
+
+  if (unlinked.length === 0) {
+    return linkedViews;
+  }
+
+  const legacyPlanned = planAttemptBackfillForRequest({
+    shotRequestId: params.shotRequestId,
+    productSku: params.sku,
+    shotIdea: params.shotIdea,
+    productPhotoUrl: params.productPhotoUrl,
+    candidates: unlinked.map((candidate) => ({
+      ...candidate,
+      productSku: params.sku,
+      shotRequestId: params.shotRequestId,
+      generationAttemptId: null,
+    })),
+  }).map((attempt) => ({
+    ...attempt,
+    isLegacy: true,
+    attemptNumber: null,
+    label: formatGenerationAttemptLabel({ attemptNumber: null, isLegacy: true }),
+  }));
+
+  const legacyViews = plannedAttemptsToHistoryViews({
+    planned: legacyPlanned,
+    productPhotoUrl: params.productPhotoUrl,
+    candidates: unlinked,
+  });
+
+  return [...linkedViews, ...legacyViews].sort(
+    (left, right) => right.createdAt.getTime() - left.createdAt.getTime(),
+  );
 };
