@@ -1,7 +1,7 @@
 {
   "name": "studio-shots",
   "version": "1.0.0",
-  "description": "Studio Shots — Slack-primary chat workflow for styled product photography: import a catalog CSV, generate lifestyle candidates with Luma, approve in chat, publish to product pages. Telegram is also supported.",
+  "description": "Studio Shots: Slack-primary chat workflow for styled product photography. Import a catalog CSV, generate lifestyle candidates with Luma, approve in chat, publish to product pages. Telegram is also supported.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

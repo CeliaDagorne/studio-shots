@@ -440,7 +440,7 @@ const notifyDeliveryFailed = async (params: {
 
   await notifyConversation(
     params.conversation,
-    `Could not deliver review controls for ${params.sku}. ${params.readyCount} candidate(s) are ready — ask to resend without regenerating.`,
+    `Could not deliver review controls for ${params.sku}. ${params.readyCount} candidate(s) are ready. Ask to resend without regenerating.`,
   );
 };
 

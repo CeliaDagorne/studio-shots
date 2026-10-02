@@ -1135,7 +1135,7 @@ export const buildSlackCandidateDeliveryFailedText = (params: {
     "",
     "⚠️ Review controls could not be delivered for this candidate.",
     "The image was generated successfully, but Slack could not show Approve/Reject buttons.",
-    "Use Resend review messages (if offered) — do not regenerate just to recover delivery.",
+    "Use Resend review messages (if offered). Do not regenerate just to recover delivery.",
   ].join("\n");
 
 export const buildSlackGenerationFailedFallbackText = (params: {

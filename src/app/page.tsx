@@ -251,7 +251,7 @@ export default async function HomePage() {
                 <div className={styles.slackMessage}>
                   <small>Studio Shots · just now</small>
                   <p>
-                    📸 Catalog ready — {DEMO_CATALOG_PRODUCTS.length} products ready to generate.
+                    📸 Catalog ready. {DEMO_CATALOG_PRODUCTS.length} products ready to generate.
                     Estimated cost shown before you start.
                   </p>
                 </div>

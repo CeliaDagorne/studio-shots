@@ -8,10 +8,10 @@ export const SITE_TITLE = "Studio Shots";
 export const HOME_HERO_EYEBROW = "Slack-first product photography";
 
 export const HOME_HERO_TITLE =
-  "Turn your catalog into approved product shots — without leaving Slack.";
+  "Turn your catalog into approved product shots without leaving Slack.";
 
 export const HOME_HERO_LEDE =
-  "Import a CSV, preview cost, generate lifestyle images, and review them with the team — all in Slack.";
+  "Import a CSV, preview cost, generate lifestyle images, and review them with the team in Slack.";
 
 export const HOME_HERO_SUPPORT =
   "Human review before anything becomes a final asset.";
@@ -52,7 +52,7 @@ export const HOME_CHAT_FIRST_BODY =
 export const HOME_CAMPAIGN_SECTION_TITLE = "The web app is the shared record";
 
 export const HOME_CAMPAIGN_SECTION_BODY =
-  "Slack runs the workflow. The companion site shows campaign progress, actionable products, approved image counts, and estimated spend — a read-only record your team can share.";
+  "Slack runs the workflow. The companion site shows campaign progress, actionable products, approved image counts, and estimated spend as a read-only record your team can share.";
 
 export const HOME_FINAL_CTA_TITLE = "Explore the working prototype";
 
