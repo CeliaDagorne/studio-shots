@@ -20,7 +20,7 @@ import {
 } from "@/lib/website-copy";
 
 test("website copy presents Slack as the primary workflow", () => {
-  assert.equal(HOME_HERO_TITLE, "AI product photography, directly in Slack");
+  assert.match(HOME_HERO_TITLE, /without leaving Slack/);
   assert.match(SITE_DESCRIPTION, /without leaving your team’s channel/);
   assert.match(SITE_DESCRIPTION, /Telegram is also supported/);
   assert.match(HOME_EMPTY_CAMPAIGN, /Upload a catalog CSV in Slack/);
@@ -32,10 +32,10 @@ test("website copy presents Slack as the primary workflow", () => {
 
 test("how-it-works steps are Slack-first and avoid Telegram residue", () => {
   assert.equal(HOME_STEPS.length, 4);
-  assert.equal(HOME_STEPS[0]?.title, "Import catalog");
+  assert.equal(HOME_STEPS[0]?.title, "Import the catalog");
   assert.match(HOME_STEPS[0]!.body, /Slack/);
   assert.doesNotMatch(HOME_STEPS[0]!.body, /Telegram|\/import/);
-  assert.equal(HOME_STEPS[2]?.title, "Generate and review in Slack");
+  assert.equal(HOME_STEPS[2]?.title, "Generate and approve in Slack");
   assert.match(HOME_STEPS[2]!.body, /your channel/);
   for (const step of HOME_STEPS) {
     assert.doesNotMatch(step.title, /Telegram/);

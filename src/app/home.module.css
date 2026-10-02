@@ -1,59 +1,150 @@
 .page {
   min-height: 100vh;
-  padding: 2rem 1.25rem 3.5rem;
-  animation: rise 700ms ease both;
+  padding: 0 0 4rem;
 }
 
 .shell {
   width: min(1120px, 100%);
   margin: 0 auto;
+  padding: 0 1.25rem;
 }
+
+/* ——— Header ——— */
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  backdrop-filter: blur(14px);
+  background: color-mix(in srgb, var(--paper) 82%, transparent);
+  border-bottom: 1px solid var(--line);
+}
+
+.headerInner {
+  width: min(1120px, 100%);
+  margin: 0 auto;
+  padding: 0.75rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  text-decoration: none;
+  min-width: 0;
+}
+
+.brandLogo {
+  width: 2.15rem;
+  height: 2.15rem;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.brandName {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 1.15rem;
+  font-weight: 560;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem 0.85rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.navLink {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.92rem;
+  font-weight: 500;
+  padding: 0.35rem 0.2rem;
+  border-radius: 0.35rem;
+  transition: color 160ms ease;
+}
+
+.navLink:hover {
+  color: var(--ink);
+}
+
+.navCta {
+  margin-left: 0.15rem;
+}
+
+.navCta :global(a) {
+  min-height: 2.35rem;
+  padding: 0.45rem 1rem;
+  font-size: 0.85rem;
+}
+
+/* ——— Hero ——— */
 
 .hero {
   display: grid;
+  gap: 2.5rem;
+  padding: 2.25rem 0 2.75rem;
+  animation: rise 700ms ease both;
+}
+
+.heroCopy {
+  display: grid;
   gap: 1rem;
-  margin-bottom: 2.75rem;
-  padding-top: 0.5rem;
+  align-content: start;
 }
 
 .eyebrow {
   margin: 0;
   color: var(--muted);
-  letter-spacing: 0.14em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  font-size: 0.95rem;
-  font-weight: 500;
+  font-size: 0.78rem;
+  font-weight: 560;
 }
 
-.hero h1 {
+.heroCopy h1 {
   margin: 0;
-  max-width: 17ch;
+  max-width: 16ch;
   font-family: var(--font-display), Georgia, serif;
-  font-size: clamp(2.6rem, 8vw, 4.6rem);
+  font-size: clamp(2.15rem, 5.5vw, 3.35rem);
   font-weight: 520;
-  line-height: 1;
-  letter-spacing: -0.04em;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
 }
 
 .lede {
   margin: 0;
-  max-width: 43rem;
+  max-width: 34rem;
   color: var(--muted);
-  font-size: 1.08rem;
+  font-size: 1.05rem;
   line-height: 1.55;
 }
 
 .ctaRow {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.65rem;
-  margin-top: 0.35rem;
+  gap: 0.7rem;
+  margin-top: 0.2rem;
+}
+
+.support {
+  margin: 0;
+  color: var(--text-subtle);
+  font-size: 0.9rem;
+  line-height: 1.45;
 }
 
 .hint {
-  margin: 0.25rem 0 0;
+  margin: 0.15rem 0 0;
   color: var(--muted);
-  font-size: 0.92rem;
+  font-size: 0.9rem;
   line-height: 1.45;
 }
 
@@ -62,20 +153,187 @@
   color: var(--ink);
 }
 
+.heroVisual {
+  position: relative;
+  min-height: 22rem;
+  display: grid;
+  place-items: center;
+}
+
+.visualStage {
+  position: relative;
+  width: min(100%, 26rem);
+  aspect-ratio: 4 / 5.15;
+}
+
+.primaryShot {
+  position: absolute;
+  inset: 0 8% 8% 0;
+  border-radius: 1.15rem;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: #fff;
+  box-shadow: var(--shadow);
+  z-index: 1;
+}
+
+.primaryShot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.secondaryShot {
+  position: absolute;
+  width: 42%;
+  aspect-ratio: 4 / 5;
+  right: 0;
+  bottom: 0;
+  border-radius: 0.85rem;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: #fff;
+  box-shadow: var(--shadow-soft);
+  z-index: 2;
+  transform: rotate(3deg);
+}
+
+.secondaryShot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.reviewCard {
+  position: absolute;
+  left: -0.35rem;
+  bottom: 18%;
+  z-index: 3;
+  width: min(13.5rem, 58%);
+  padding: 0.75rem 0.8rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: var(--shadow);
+}
+
+.reviewBrand {
+  margin: 0 0 0.35rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.reviewTitle {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 560;
+  line-height: 1.3;
+}
+
+.reviewMeta {
+  margin: 0.2rem 0 0.65rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.reviewActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+
+.approve,
+.reject {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  min-height: 2rem;
+  font-size: 0.72rem;
+  font-weight: 560;
+}
+
+.approve {
+  background: var(--ink);
+  color: #fbfaf8;
+  border-color: transparent;
+}
+
+.reject {
+  background: #fff;
+  color: var(--ink);
+}
+
+.costChip {
+  position: absolute;
+  top: 6%;
+  right: -0.25rem;
+  z-index: 3;
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: var(--shadow-soft);
+  font-size: 0.75rem;
+  font-weight: 560;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.costChip span {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/* ——— Trust strip ——— */
+
+.trust {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0 0 3rem;
+  padding: 1rem 0;
+  border-block: 1px solid var(--line);
+}
+
+.trustItem {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.35rem 0;
+}
+
+.trustItem strong {
+  font-size: 0.95rem;
+  font-weight: 560;
+}
+
+.trustItem span {
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+/* ——— Sections ——— */
+
 .section {
-  margin-bottom: 2.75rem;
+  margin-bottom: 3.25rem;
+  animation: rise 800ms ease both;
 }
 
 .sectionHead {
   display: grid;
-  gap: 0.35rem;
-  margin-bottom: 1.15rem;
+  gap: 0.4rem;
+  margin-bottom: 1.35rem;
+  max-width: 38rem;
 }
 
 .sectionHead h2 {
   margin: 0;
   font-family: var(--font-display), Georgia, serif;
-  font-size: clamp(1.6rem, 4vw, 2.2rem);
+  font-size: clamp(1.65rem, 4vw, 2.25rem);
   font-weight: 540;
   letter-spacing: -0.03em;
 }
@@ -83,8 +341,7 @@
 .sectionHead p {
   margin: 0;
   color: var(--muted);
-  max-width: 36rem;
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
 .steps {
@@ -92,36 +349,381 @@
   padding: 0;
   list-style: none;
   display: grid;
-  gap: 0.85rem;
+  gap: 0.9rem;
+  counter-reset: step;
 }
 
-.steps li {
+.step {
+  counter-increment: step;
   display: grid;
-  gap: 0.25rem;
-  padding: 1rem 1.1rem;
+  gap: 0.75rem;
+  padding: 1.05rem 1.1rem 1.15rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
-  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-soft);
 }
 
-.steps strong {
-  font-size: 1.02rem;
+.stepFigure {
+  display: grid;
+  place-items: center;
+  min-height: 5.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(160deg, rgba(248, 238, 220, 0.55), transparent 55%),
+    linear-gradient(20deg, rgba(220, 204, 240, 0.35), transparent 50%),
+    #fff;
+  overflow: hidden;
 }
 
-.steps span {
+.stepMock {
+  width: 78%;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.mockLine {
+  height: 0.45rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
+.mockLineWide {
+  width: 100%;
+}
+
+.mockLineMid {
+  width: 72%;
+}
+
+.mockLineShort {
+  width: 48%;
+}
+
+.mockChipRow {
+  display: flex;
+  gap: 0.3rem;
+  margin-top: 0.15rem;
+}
+
+.mockChip {
+  height: 1.35rem;
+  flex: 1;
+  border-radius: 0.4rem;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.mockChipAccent {
+  background: color-mix(in srgb, var(--periwinkle) 45%, #fff);
+}
+
+.mockThumbRow {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.3rem;
+  margin-top: 0.1rem;
+}
+
+.mockThumb {
+  aspect-ratio: 1;
+  border-radius: 0.35rem;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--blush) 35%, #fff);
+}
+
+.mockThumbApproved {
+  background: color-mix(in srgb, var(--lavender) 40%, #fff);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ink) 18%, transparent);
+}
+
+.stepBody {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.stepBody::before {
+  content: counter(step, decimal-leading-zero);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   color: var(--muted);
+  font-weight: 600;
+}
+
+.stepBody strong {
+  font-size: 1.02rem;
+  font-weight: 560;
+}
+
+.stepBody span {
+  color: var(--muted);
+  font-size: 0.92rem;
   line-height: 1.45;
 }
 
+/* ——— Chat-first split ——— */
+
+.split {
+  display: grid;
+  gap: 1.75rem;
+  align-items: center;
+}
+
+.slackPreview {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.slackHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.75rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--paper) 70%, #fff);
+}
+
+.slackDot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--periwinkle) 70%, var(--ink));
+}
+
+.slackHeader strong {
+  font-size: 0.88rem;
+}
+
+.slackHeader span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.slackBody {
+  display: grid;
+  gap: 0.85rem;
+  padding: 0.95rem;
+}
+
+.slackMessage {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.slackMessage p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.slackMessage small {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.slackCandidate {
+  display: grid;
+  grid-template-columns: 4.25rem 1fr;
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+}
+
+.slackCandidate img {
+  width: 4.25rem;
+  height: 5.3rem;
+  object-fit: cover;
+  border-radius: 0.4rem;
+  border: 1px solid var(--line);
+}
+
+.slackCandidateActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+}
+
+.slackCandidateActions span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.85rem;
+  padding: 0 0.7rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 560;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.slackCandidateActions span:first-child {
+  background: var(--ink);
+  color: #fbfaf8;
+  border-color: transparent;
+}
+
+/* ——— Campaign visibility ——— */
+
+.campaignPanel {
+  display: grid;
+  gap: 1rem;
+  padding: 1.2rem 1.15rem 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow-soft);
+}
+
+.panelTitle {
+  margin: 0;
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 1.35rem;
+  font-weight: 540;
+  letter-spacing: -0.03em;
+}
+
+.campaignMetrics {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.campaignMetrics li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.campaignMetrics span {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.campaignMetrics strong {
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.campaignNote {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+/* ——— Final CTA ——— */
+
+.finalCta {
+  display: grid;
+  gap: 1rem;
+  padding: 1.75rem 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) + 0.15rem);
+  background:
+    linear-gradient(135deg, rgba(248, 238, 220, 0.45), transparent 45%),
+    linear-gradient(320deg, rgba(200, 212, 244, 0.28), transparent 40%),
+    #fff;
+  box-shadow: var(--shadow-soft);
+  text-align: center;
+  justify-items: center;
+}
+
+.finalCta h2 {
+  margin: 0;
+  font-family: var(--font-display), Georgia, serif;
+  font-size: clamp(1.55rem, 3.5vw, 2rem);
+  font-weight: 540;
+  letter-spacing: -0.03em;
+}
+
+.finalCta p {
+  margin: 0;
+  max-width: 34rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* ——— Demo catalog ——— */
+
+.demoNote {
+  margin: 0 0 1rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
 @media (min-width: 720px) {
+  .trust {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1.25rem;
+    padding: 1.15rem 0;
+  }
+
   .steps {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .campaignMetrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .split {
+    grid-template-columns: 1.05fr 0.95fr;
+    gap: 2.25rem;
   }
 }
 
 @media (min-width: 980px) {
+  .hero {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    gap: 2.75rem;
+    align-items: center;
+    padding: 3rem 0 3.25rem;
+  }
+
+  .heroVisual {
+    min-height: 28rem;
+  }
+
+  .visualStage {
+    width: min(100%, 28rem);
+  }
+
   .steps {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .navLink {
+    display: inline;
+  }
+}
+
+@media (max-width: 719px) {
+  .secondaryShot {
+    width: 38%;
+  }
+
+  .reviewCard {
+    width: min(12.5rem, 62%);
+    bottom: 12%;
+  }
+
+  .navLinkHideMobile {
+    display: none;
   }
 }
