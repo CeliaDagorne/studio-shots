@@ -39,6 +39,8 @@ import {
   buildSlackProductPickerBlocks,
   buildSlackProductPickerLoadingBlocks,
   finalizeSlackCandidateMessageBlocks,
+  isSlackGenActionId,
+  isSlackPageActionId,
   parseSlackGenValue,
   parseSlackPageValue,
   SLACK_ACTION_IDS,
@@ -390,7 +392,7 @@ export const handleSlackBlockAction = async (
     return beginProductPicker(action.value, 0, payload.response_url);
   }
 
-  if (action.action_id === SLACK_ACTION_IDS.page) {
+  if (isSlackPageActionId(action.action_id)) {
     const parsed = parseSlackPageValue(action.value);
     if (!parsed) {
       return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.unknownAction) };
@@ -454,7 +456,7 @@ export const handleSlackBlockAction = async (
   }
 
   if (
-    action.action_id === SLACK_ACTION_IDS.gen ||
+    isSlackGenActionId(action.action_id) ||
     action.action_id === SLACK_ACTION_IDS.retry
   ) {
     const parsed = parseSlackGenValue(action.value);

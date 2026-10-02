@@ -100,6 +100,21 @@ export const SLACK_ACTION_IDS = {
   reject: "ss_cand_reject",
 } as const;
 
+/** Unique per-SKU generate button — Slack forbids duplicate action_ids in one message. */
+export const slackGenActionIdForSku = (sku: string): string =>
+  `${SLACK_ACTION_IDS.gen}:${sku}`;
+
+export const slackPageActionId = (direction: "prev" | "next"): string =>
+  `${SLACK_ACTION_IDS.page}:${direction}`;
+
+export const isSlackGenActionId = (actionId: string): boolean =>
+  actionId === SLACK_ACTION_IDS.gen ||
+  actionId.startsWith(`${SLACK_ACTION_IDS.gen}:`);
+
+export const isSlackPageActionId = (actionId: string): boolean =>
+  actionId === SLACK_ACTION_IDS.page ||
+  actionId.startsWith(`${SLACK_ACTION_IDS.page}:`);
+
 const VALUE_SEP = "::";
 
 export const encodeSlackImportValue = (importId: string): string => importId;
@@ -484,7 +499,7 @@ export const buildSlackProductPickerBlocks = (params: {
       block_id: `ss_imp_gen:${params.importId}:${safePage}:${chunkIndex}`,
       elements: group.map((option) =>
         button({
-          actionId: SLACK_ACTION_IDS.gen,
+          actionId: slackGenActionIdForSku(option.sku),
           text: formatProductPickerButtonText(option),
           value: encodeSlackGenValue(params.importId, option.requestId, option.sku),
         }),
@@ -496,7 +511,7 @@ export const buildSlackProductPickerBlocks = (params: {
   if (safePage > 0) {
     navElements.push(
       button({
-        actionId: SLACK_ACTION_IDS.page,
+        actionId: slackPageActionId("prev"),
         text: "Previous",
         value: encodeSlackPageValue(params.importId, safePage - 1),
       }),
@@ -505,7 +520,7 @@ export const buildSlackProductPickerBlocks = (params: {
   if (safePage < totalPages - 1) {
     navElements.push(
       button({
-        actionId: SLACK_ACTION_IDS.page,
+        actionId: slackPageActionId("next"),
         text: "Next",
         value: encodeSlackPageValue(params.importId, safePage + 1),
       }),

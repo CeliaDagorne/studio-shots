@@ -405,6 +405,62 @@ test("product picker stays within Slack action block limits", async () => {
   );
 });
 
+test("product picker action_ids are unique within the message", async () => {
+  const {
+    buildSlackProductPickerBlocks,
+    isSlackGenActionId,
+    isSlackPageActionId,
+    SLACK_ACTION_IDS,
+    SLACK_PRODUCT_PICKER_PAGE_SIZE,
+  } = await import("@/lib/slack-blocks");
+  const products: ActionableProductOption[] = Array.from({ length: 8 }, (_, index) => ({
+    requestId: `req-${index}`,
+    sku: `SS-${String(index + 1).padStart(3, "0")}`,
+    priority: index === 0 ? ("high" as const) : ("normal" as const),
+  }));
+
+  const page0 = buildSlackProductPickerBlocks({
+    importId: "import-aaa",
+    products,
+    page: 0,
+    pageSize: SLACK_PRODUCT_PICKER_PAGE_SIZE,
+  });
+  const page1 = buildSlackProductPickerBlocks({
+    importId: "import-aaa",
+    products,
+    page: 1,
+    pageSize: SLACK_PRODUCT_PICKER_PAGE_SIZE,
+  });
+
+  const collectActionIds = (blocks: Array<{ type?: string; elements?: Array<{ action_id?: string }> }>) =>
+    blocks.flatMap((block) =>
+      block.type === "actions"
+        ? (block.elements ?? []).map((element) => element.action_id).filter(Boolean)
+        : [],
+    );
+
+  for (const blocks of [page0.blocks, page1.blocks]) {
+    const actionIds = collectActionIds(blocks) as string[];
+    assert.equal(actionIds.length, new Set(actionIds).size);
+    assert.ok(actionIds.every((id) => id !== SLACK_ACTION_IDS.gen));
+    assert.ok(actionIds.filter(isSlackGenActionId).length >= 1);
+  }
+
+  const middlePage = buildSlackProductPickerBlocks({
+    importId: "import-aaa",
+    products: Array.from({ length: 15 }, (_, index) => ({
+      requestId: `req-${index}`,
+      sku: `SS-${String(index + 1).padStart(3, "0")}`,
+      priority: "normal" as const,
+    })),
+    page: 1,
+    pageSize: 5,
+  });
+  const middleIds = collectActionIds(middlePage.blocks) as string[];
+  assert.equal(middleIds.length, new Set(middleIds).size);
+  assert.equal(middleIds.filter(isSlackPageActionId).length, 2);
+});
+
 test("product picker paginates with SKU, priority, and estimated cost", async () => {
   const { buildSlackProductPickerBlocks, SLACK_PRODUCT_PICKER_PAGE_SIZE } = await import(
     "@/lib/slack-blocks"
