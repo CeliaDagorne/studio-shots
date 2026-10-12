@@ -31,6 +31,10 @@ export const PRODUCT_PHOTOGRAPHY_CONSTRAINTS = [
   "Build the requested lifestyle environment around the product.",
   "Avoid large empty areas and plain white backgrounds.",
   "Props may support the scene but must never cover the product.",
+  "Preserve believable real-world scale.",
+  "The product must have realistic proportions relative to furniture, surfaces and props.",
+  "Never place it on oversized furniture or architecture that makes it appear miniature.",
+  "Use close environmental framing: supporting surfaces should extend only slightly beyond the product, rather than being shown in full.",
 ].join("\n");
 
 /** Instruct Luma to fill the prepared canvas rather than keep letterboxing. */
