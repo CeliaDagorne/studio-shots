@@ -18,9 +18,12 @@ import {
   generationAttemptNumber,
 } from "@/lib/review";
 import {
+  formatStoredAspectRatioLabel,
+  UNKNOWN_ASPECT_RATIO,
+} from "@/lib/output-format";
+import {
   CANDIDATES_PER_REQUEST,
   IMAGE_REF_COST_USD_MICROS,
-  MVP_ASPECT_RATIO,
   formatUsdMicros,
 } from "@/lib/request-planning";
 import {
@@ -476,7 +479,7 @@ const plannedAttemptsToHistoryViews = (params: {
         environment,
         environmentLabel: environment === "test" ? "Test mode" : "Luma",
         shotIdea: attempt.shotIdea,
-        aspectRatio: attempt.aspectRatio,
+        aspectRatio: formatStoredAspectRatioLabel(attempt.aspectRatio),
         costLabel: formatAttemptCostLabel({ environment, chargedCandidateCount }),
         status: attempt.status,
         statusLabel: formatAttemptStatusLabel(attempt.status),
@@ -565,7 +568,7 @@ const historyViewsFromStoredAttempts = (params: {
         environment,
         environmentLabel: environment === "test" ? "Test mode" : "Luma",
         shotIdea: attempt.shotIdea,
-        aspectRatio: attempt.aspectRatio || MVP_ASPECT_RATIO,
+        aspectRatio: formatStoredAspectRatioLabel(attempt.aspectRatio),
         costLabel: formatAttemptCostLabel({ environment, chargedCandidateCount }),
         status,
         statusLabel: formatAttemptStatusLabel(status),
@@ -1102,7 +1105,7 @@ export const historyViewsIncludingLegacyUnlinked = (params: {
           isLegacy: true,
           label: formatGenerationAttemptLabel({ attemptNumber: null, isLegacy: true }),
           shotIdea: params.shotIdea,
-          aspectRatio: MVP_ASPECT_RATIO,
+          aspectRatio: UNKNOWN_ASPECT_RATIO,
           environment: inferAttemptEnvironment({
             productPhotoUrl: params.productPhotoUrl,
             candidates: unlinked,

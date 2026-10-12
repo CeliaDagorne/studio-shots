@@ -34,6 +34,8 @@ export const imports = pgTable("imports", {
   additionalEstimatedCostMicrosUsd: integer("additional_estimated_cost_micros_usd").notNull(),
   warnings: jsonb("warnings").notNull(),
   priorityRequestSku: text("priority_request_sku"),
+  /** Campaign-wide output format: 4:5 | 1:1 | 3:2 (DB CHECK enforced). */
+  outputAspectRatio: text("output_aspect_ratio").default("4:5").notNull(),
   platform: text("platform").notNull(),
   conversationId: text("conversation_id").notNull(),
   externalEventId: text("external_event_id").notNull(),

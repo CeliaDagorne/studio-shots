@@ -7,13 +7,19 @@ import {
   formatUsdMicros,
   hasActionableGenerations,
   IMPORT_UP_TO_DATE_MESSAGE,
-  MVP_ASPECT_RATIO,
 } from "@/lib/request-planning";
 import { candidateCaption, MIN_APPROVALS_TO_COMPLETE } from "@/lib/review";
 import {
   SLACK_FAKE_CANDIDATE_CONTEXT,
   SLACK_FAKE_GENERATION_CONTEXT,
 } from "@/lib/image-generation";
+import {
+  OUTPUT_ASPECT_RATIOS,
+  outputAspectRatioLabel,
+  parseOutputAspectRatio,
+  type OutputAspectRatio,
+} from "@/lib/output-format";
+import { isSlackAccessibleImageUrl } from "@/lib/slack-image-url";
 import type { ActionableProductOption, RequestPlanSummary } from "@/types";
 
 export type SlackBlock = Record<string, unknown>;
@@ -92,6 +98,8 @@ export const SLACK_ACTION_IDS = {
   gen: "ss_imp_gen",
   page: "ss_imp_page",
   back: "ss_imp_back",
+  /** Set campaign output aspect ratio before the first generation. */
+  format: "ss_imp_format",
   /** Retry generation after failure or regenerate under-threshold reviews. */
   retry: "ss_req_retry",
   /** Re-deliver existing ready candidates without creating a new generation. */
@@ -99,6 +107,27 @@ export const SLACK_ACTION_IDS = {
   approve: "ss_cand_approve",
   reject: "ss_cand_reject",
 } as const;
+
+const VALUE_SEP = "::";
+
+const isOutputAspectRatioSafe = (value: string): value is OutputAspectRatio =>
+  (OUTPUT_ASPECT_RATIOS as readonly string[]).includes(value);
+
+export const encodeSlackFormatValue = (
+  importId: string,
+  ratio: OutputAspectRatio,
+): string => `${importId}${VALUE_SEP}${ratio}`;
+
+export const parseSlackFormatValue = (
+  value: string,
+): { importId: string; ratio: OutputAspectRatio } | null => {
+  const idx = value.indexOf(VALUE_SEP);
+  if (idx <= 0) return null;
+  const importId = value.slice(0, idx);
+  const ratio = value.slice(idx + VALUE_SEP.length);
+  if (!importId || !isOutputAspectRatioSafe(ratio)) return null;
+  return { importId, ratio };
+};
 
 /** Unique per-SKU generate button — Slack forbids duplicate action_ids in one message. */
 export const slackGenActionIdForSku = (sku: string): string =>
@@ -115,7 +144,9 @@ export const isSlackPageActionId = (actionId: string): boolean =>
   actionId === SLACK_ACTION_IDS.page ||
   actionId.startsWith(`${SLACK_ACTION_IDS.page}:`);
 
-const VALUE_SEP = "::";
+export const isSlackFormatActionId = (actionId: string): boolean =>
+  actionId === SLACK_ACTION_IDS.format ||
+  actionId.startsWith(`${SLACK_ACTION_IDS.format}:`);
 
 export const encodeSlackImportValue = (importId: string): string => importId;
 
@@ -244,6 +275,41 @@ export const buildSlackImportActionElements = (
  * Block Kit preview for a catalog import. Uses the shared RequestPlanSummary —
  * no separate planning logic.
  */
+const buildSlackOutputFormatSection = (
+  summary: RequestPlanSummary,
+): SlackBlock[] => {
+  const ratio = parseOutputAspectRatio(summary.outputAspectRatio);
+  const locked = Boolean(summary.outputAspectRatioLocked);
+  const blocks: SlackBlock[] = [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: locked
+          ? `*Output format*\nSelected: *${outputAspectRatioLabel(ratio)}* · locked after first generation`
+          : `*Output format*\nSelected: *${outputAspectRatioLabel(ratio)}*`,
+      },
+    },
+  ];
+
+  if (!locked) {
+    blocks.push({
+      type: "actions",
+      block_id: `ss_imp_format:${summary.importId}`,
+      elements: OUTPUT_ASPECT_RATIOS.map((option) =>
+        button({
+          actionId: `${SLACK_ACTION_IDS.format}:${option}`,
+          text: outputAspectRatioLabel(option),
+          value: encodeSlackFormatValue(summary.importId, option),
+          style: option === ratio ? "primary" : undefined,
+        }),
+      ),
+    });
+  }
+
+  return blocks;
+};
+
 export const buildSlackImportPreviewBlocks = (
   summary: RequestPlanSummary,
   options?: {
@@ -266,6 +332,7 @@ export const buildSlackImportPreviewBlocks = (
 
   const estimatedCostLabel = testMode ? "Estimated production cost" : "Estimated cost";
   const perProductLabel = testMode ? "Production cost per product" : "Per product";
+  const ratio = parseOutputAspectRatio(summary.outputAspectRatio);
 
   const blocks: SlackBlock[] = [
     {
@@ -298,9 +365,11 @@ export const buildSlackImportPreviewBlocks = (
           perProductLabel,
           `${perProductCost} · ${CANDIDATES_PER_REQUEST} candidates`,
         ),
-        field("Format", MVP_ASPECT_RATIO),
+        field("Format", outputAspectRatioLabel(ratio)),
       ],
     },
+    { type: "divider" },
+    ...buildSlackOutputFormatSection(summary),
     { type: "divider" },
     {
       type: "section",
@@ -379,7 +448,7 @@ export const buildSlackImportPreviewFallbackText = (
     `Planned output: ${summary.plannedGenerations} images`,
     `${estimatedCostLabel}: ${formatUsdMicros(summary.additionalEstimatedCostMicrosUsd)} total`,
     `${perProductLabel}: ${perProductCost} · ${CANDIDATES_PER_REQUEST} candidates`,
-    `Format: ${MVP_ASPECT_RATIO}`,
+    `Format: ${outputAspectRatioLabel(parseOutputAspectRatio(summary.outputAspectRatio))}`,
     "",
   );
   if (summary.priorityRequestSku) {
@@ -573,6 +642,7 @@ export type GenerationStartedMessageParams = {
   sku: string;
   shotIdea?: string | null;
   testMode?: boolean;
+  outputAspectRatio?: OutputAspectRatio | string;
 };
 
 const normalizeShotIdea = (shotIdea: string | null | undefined): string | null => {
@@ -583,18 +653,26 @@ const normalizeShotIdea = (shotIdea: string | null | undefined): string | null =
   return trimmed.length > 0 ? trimmed : null;
 };
 
-const generationStartedSummaryLine = (testMode: boolean): string => {
+const generationStartedSummaryLine = (
+  testMode: boolean,
+  ratio: OutputAspectRatio,
+): string => {
+  const format = outputAspectRatioLabel(ratio);
   if (testMode) {
-    return `${CANDIDATES_PER_REQUEST} demo candidates · ${MVP_ASPECT_RATIO} portrait · $0.00 charged`;
+    return `${CANDIDATES_PER_REQUEST} demo candidates · ${format} · $0.00 charged`;
   }
-  return `${CANDIDATES_PER_REQUEST} lifestyle candidates · ${MVP_ASPECT_RATIO} portrait · ${formatOneProductCostLabel()}`;
+  return `${CANDIDATES_PER_REQUEST} lifestyle candidates · ${format} · ${formatOneProductCostLabel()}`;
 };
 
-const generationStartedSummaryMrkdwn = (testMode: boolean): string => {
+const generationStartedSummaryMrkdwn = (
+  testMode: boolean,
+  ratio: OutputAspectRatio,
+): string => {
+  const format = outputAspectRatioLabel(ratio);
   if (testMode) {
-    return `*${CANDIDATES_PER_REQUEST} demo candidates* · *${MVP_ASPECT_RATIO} portrait* · *$0.00 charged*`;
+    return `*${CANDIDATES_PER_REQUEST} demo candidates* · *${format}* · *$0.00 charged*`;
   }
-  return `*${CANDIDATES_PER_REQUEST} lifestyle candidates* · *${MVP_ASPECT_RATIO} portrait* · *${formatOneProductCostLabel()}*`;
+  return `*${CANDIDATES_PER_REQUEST} lifestyle candidates* · *${format}* · *${formatOneProductCostLabel()}*`;
 };
 
 const generationStartedSupportLine = (testMode: boolean): string =>
@@ -605,10 +683,11 @@ const generationStartedSupportLine = (testMode: boolean): string =>
 export const buildSlackGenerationStartedFallbackText = (
   params: GenerationStartedMessageParams | string,
 ): string => {
-  const { sku, shotIdea, testMode } =
+  const { sku, shotIdea, testMode, outputAspectRatio } =
     typeof params === "string"
-      ? { sku: params, shotIdea: null, testMode: false }
+      ? { sku: params, shotIdea: null, testMode: false, outputAspectRatio: undefined }
       : { testMode: false, ...params };
+  const ratio = parseOutputAspectRatio(outputAspectRatio);
   const idea = normalizeShotIdea(shotIdea);
   const lines = [`✨ Generating ${sku}`, ""];
   if (testMode) {
@@ -618,7 +697,7 @@ export const buildSlackGenerationStartedFallbackText = (
     lines.push("Creative direction", idea, "");
   }
   lines.push(
-    generationStartedSummaryLine(Boolean(testMode)),
+    generationStartedSummaryLine(Boolean(testMode), ratio),
     "",
     generationStartedSupportLine(Boolean(testMode)),
   );
@@ -628,10 +707,11 @@ export const buildSlackGenerationStartedFallbackText = (
 export const buildSlackGenerationStartedBlocks = (
   params: GenerationStartedMessageParams | string,
 ): SlackBlock[] => {
-  const { sku, shotIdea, testMode } =
+  const { sku, shotIdea, testMode, outputAspectRatio } =
     typeof params === "string"
-      ? { sku: params, shotIdea: null, testMode: false }
+      ? { sku: params, shotIdea: null, testMode: false, outputAspectRatio: undefined }
       : { testMode: false, ...params };
+  const ratio = parseOutputAspectRatio(outputAspectRatio);
   const idea = normalizeShotIdea(shotIdea);
   const blocks: SlackBlock[] = [
     {
@@ -666,7 +746,10 @@ export const buildSlackGenerationStartedBlocks = (
       type: "section",
       text: {
         type: "mrkdwn",
-        text: truncateSlackText(generationStartedSummaryMrkdwn(Boolean(testMode)), 3000),
+        text: truncateSlackText(
+          generationStartedSummaryMrkdwn(Boolean(testMode), ratio),
+          3000,
+        ),
       },
     },
     {
@@ -1303,6 +1386,8 @@ export const buildSlackCandidateBlocks = (params: {
   total: number;
   reviewDecision?: string | null;
   testMode?: boolean;
+  /** Shown when generated pixels do not match the campaign output ratio. */
+  formatWarning?: string | null;
 }): { text: string; blocks: SlackBlock[] } => {
   const statusLine =
     params.reviewDecision === "approved"
@@ -1310,6 +1395,10 @@ export const buildSlackCandidateBlocks = (params: {
       : params.reviewDecision === "rejected"
         ? "*❌ Rejected*"
         : "Review this candidate independently.";
+  const formatWarning =
+    typeof params.formatWarning === "string" && params.formatWarning.trim().length > 0
+      ? params.formatWarning.trim()
+      : null;
 
   const textLines =
     params.reviewDecision === "approved" || params.reviewDecision === "rejected"
@@ -1322,17 +1411,28 @@ export const buildSlackCandidateBlocks = (params: {
           }),
         ]
       : [params.caption];
+  if (formatWarning) {
+    textLines.push("", formatWarning);
+  }
   if (params.testMode) {
     textLines.push("", SLACK_FAKE_CANDIDATE_CONTEXT);
   }
   const text = textLines.join("\n");
+
+  const headerLines = [
+    `*${params.sku}* · candidate ${params.candidateIndex}/${params.total}`,
+    statusLine,
+  ];
+  if (formatWarning) {
+    headerLines.push(`⚠️ ${escapeSlackMrkdwn(formatWarning)}`);
+  }
 
   const blocks: SlackBlock[] = [
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*${params.sku}* · candidate ${params.candidateIndex}/${params.total}\n${statusLine}`,
+        text: headerLines.join("\n"),
       },
     },
   ];
@@ -1341,10 +1441,15 @@ export const buildSlackCandidateBlocks = (params: {
     blocks.push(testCandidateContextBlock());
   }
 
+  const altText = truncateSlackText(
+    `${params.sku} candidate ${params.candidateIndex}`.trim() || "Studio Shots candidate",
+    2000,
+  );
+
   blocks.push({
     type: "image",
     image_url: params.blobUrl,
-    alt_text: `${params.sku} candidate ${params.candidateIndex}`,
+    alt_text: altText,
   });
 
   if (!params.reviewDecision) {
@@ -1369,6 +1474,81 @@ export const buildSlackCandidateBlocks = (params: {
   }
 
   return { text, blocks };
+};
+
+/**
+ * Validate candidate Block Kit shape for Slack (image URL, alt_text, actions).
+ * Returns human-readable problems; empty array means structurally acceptable.
+ */
+export const validateSlackCandidateBlocks = (blocks: SlackBlock[]): string[] => {
+  const problems: string[] = [];
+
+  if (!Array.isArray(blocks) || blocks.length === 0) {
+    return ["blocks must be a non-empty array"];
+  }
+
+  let imageCount = 0;
+  for (let index = 0; index < blocks.length; index += 1) {
+    const block = blocks[index];
+    if (!block || typeof block !== "object") {
+      problems.push(`blocks[${index}] must be an object`);
+      continue;
+    }
+    const type = block.type;
+    if (typeof type !== "string" || !type) {
+      problems.push(`blocks[${index}].type is required`);
+      continue;
+    }
+
+    if (type === "image") {
+      imageCount += 1;
+      const imageUrl = block.image_url;
+      const altText = block.alt_text;
+      if (typeof imageUrl !== "string" || !imageUrl.trim()) {
+        problems.push(`blocks[${index}].image_url must be a non-empty string`);
+      } else if (imageUrl.trim().startsWith("/")) {
+        problems.push(`blocks[${index}].image_url must be absolute HTTPS (got relative path)`);
+      } else if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\b/i.test(imageUrl)) {
+        problems.push(`blocks[${index}].image_url must not use localhost`);
+      } else if (!isSlackAccessibleImageUrl(imageUrl)) {
+        problems.push(
+          `blocks[${index}].image_url must be a public absolute HTTPS URL (got ${imageUrl})`,
+        );
+      }
+      if (typeof altText !== "string" || !altText.trim()) {
+        problems.push(`blocks[${index}].alt_text must be non-empty plain text`);
+      } else if (altText.length > 2000) {
+        problems.push(`blocks[${index}].alt_text exceeds 2000 characters`);
+      }
+    }
+
+    if (type === "section") {
+      const sectionText = block.text as { type?: string; text?: string } | undefined;
+      if (sectionText) {
+        if (sectionText.type !== "mrkdwn" && sectionText.type !== "plain_text") {
+          problems.push(`blocks[${index}].text.type must be mrkdwn or plain_text`);
+        }
+        if (typeof sectionText.text !== "string" || !sectionText.text.trim()) {
+          problems.push(`blocks[${index}].text.text must be non-empty`);
+        } else if (sectionText.text.length > 3000) {
+          problems.push(`blocks[${index}].text.text exceeds 3000 characters`);
+        }
+      }
+    }
+
+    if (type === "actions") {
+      const elements = block.elements;
+      if (!Array.isArray(elements) || elements.length === 0) {
+        problems.push(`blocks[${index}].elements must be a non-empty array`);
+      }
+    }
+  }
+
+  if (imageCount === 0) {
+    problems.push("candidate blocks must include an image block");
+  }
+
+  return problems;
 };
 
 /**

@@ -43,6 +43,13 @@
       "when": 1788320000000,
       "tag": "0005_generation_attempts",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791820000000,
+      "tag": "0006_import_output_aspect_ratio",
+      "breakpoints": true
     }
   ]
 }

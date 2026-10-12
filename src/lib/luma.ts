@@ -33,13 +33,21 @@ export const PRODUCT_PHOTOGRAPHY_CONSTRAINTS = [
   "Props may support the scene but must never cover the product.",
 ].join("\n");
 
+/** Instruct Luma to fill the prepared canvas rather than keep letterboxing. */
+export const CANVAS_FILL_CONSTRAINTS = [
+  "The source frame is already cropped to the final output canvas.",
+  "Fill the entire canvas edge to edge with the finished scene.",
+  "Do not preserve padding, borders, letterboxing, empty bars, or matte margins from the source.",
+].join("\n");
+
 /** Build the final image-edit prompt from the catalog Shot Idea + framing rules. */
 export const buildImageEditPrompt = (params: { shotIdea: string }): string => {
   const idea = params.shotIdea.trim();
+  const constraints = `${PRODUCT_PHOTOGRAPHY_CONSTRAINTS}\n${CANVAS_FILL_CONSTRAINTS}`;
   if (!idea) {
-    return PRODUCT_PHOTOGRAPHY_CONSTRAINTS;
+    return constraints;
   }
-  return `${idea}\n\n${PRODUCT_PHOTOGRAPHY_CONSTRAINTS}`;
+  return `${idea}\n\n${constraints}`;
 };
 
 /**

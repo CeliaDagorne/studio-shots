@@ -78,6 +78,10 @@ export type RequestPlanSummary = {
   priorityRequestSku: string | null;
   priorityRequestPriority: CatalogPriority | null;
   importId: string;
+  /** Campaign-wide output format (4:5 | 1:1 | 3:2). */
+  outputAspectRatio: "4:5" | "1:1" | "3:2";
+  /** True once any generation attempt exists for this import. */
+  outputAspectRatioLocked?: boolean;
 };
 
 export type ImportResult = RequestPlanSummary & {

@@ -38,6 +38,7 @@ const sampleSummary = (): RequestPlanSummary => ({
   ],
   priorityRequestSku: "SS-001",
   priorityRequestPriority: "high",
+  outputAspectRatio: "4:5",
 });
 
 const sampleImportRow = (overrides?: Partial<ImportRow>): ImportRow =>
@@ -58,6 +59,7 @@ const sampleImportRow = (overrides?: Partial<ImportRow>): ImportRow =>
       actionable: sampleSummary().actionableProducts,
     },
     priorityRequestSku: "SS-001",
+    outputAspectRatio: "4:5",
     platform: "slack",
     conversationId: "C_ALLOWED",
     externalEventId: "Ev_IMPORT",
@@ -158,6 +160,10 @@ const baseDeps = () => {
     appUrl: "https://studio-shots.example",
     isAllowedTeam: (teamId: string) => teamId === "T_ALLOWED",
     isAllowedChannel: (channelId: string) => channelId === "C_ALLOWED",
+    withImportOutputFormatLock: async (summary: RequestPlanSummary) => ({
+      ...summary,
+      outputAspectRatioLocked: false,
+    }),
   };
   return { deps, responsePosts, messageUpdates };
 };
@@ -256,7 +262,7 @@ test("generation started Block Kit uses creative direction, summary line, and co
   assert.match(withIdeaSerialized, /_on a travertine pedestal, warm editorial interior_/);
   assert.match(
     withIdeaSerialized,
-    /\*3 lifestyle candidates\* · \*4:5 portrait\* · \*~\$0\.13\*/,
+    /\*3 lifestyle candidates\* · \*4:5 Portrait\* · \*~\$0\.13\*/,
   );
   assert.match(withIdeaSerialized, /Using the catalog product photo as the source/);
   assert.match(withIdeaSerialized, /Results will appear here when ready/);
@@ -272,7 +278,7 @@ test("generation started Block Kit uses creative direction, summary line, and co
   });
   assert.match(fallback, /Creative direction/);
   assert.match(fallback, /on a travertine pedestal, warm editorial interior/);
-  assert.match(fallback, /3 lifestyle candidates · 4:5 portrait · ~\$0\.13/);
+  assert.match(fallback, /3 lifestyle candidates · 4:5 Portrait · ~\$0\.13/);
   assert.match(fallback, /Using the catalog product photo as the source/);
   assert.doesNotMatch(fallback, /Test mode/);
   assert.doesNotMatch(fallback, /image_ref/);
@@ -309,7 +315,7 @@ test("fake-mode generation started uses demo wording and free notice", async () 
   assert.match(serialized, /\*Creative direction\*/);
   assert.match(
     serialized,
-    /\*3 demo candidates\* · \*4:5 portrait\* · \*\$0\.00 charged\*/,
+    /\*3 demo candidates\* · \*4:5 Portrait\* · \*\$0\.00 charged\*/,
   );
   assert.match(serialized, /Creating free demo candidates \(not Luma images\)/);
   assert.doesNotMatch(serialized, /lifestyle candidates/);
@@ -321,7 +327,7 @@ test("fake-mode generation started uses demo wording and free notice", async () 
     testMode: true,
   });
   assert.match(fallback, /Test mode · Free/);
-  assert.match(fallback, /3 demo candidates · 4:5 portrait · \$0\.00 charged/);
+  assert.match(fallback, /3 demo candidates · 4:5 Portrait · \$0\.00 charged/);
   assert.match(fallback, /Creative direction/);
   assert.match(fallback, /on a travertine pedestal, warm editorial interior/);
 });
@@ -521,7 +527,7 @@ test("priority generation action starts the shared generation path", async () =>
   assert.match(result.httpBody.text, /on a travertine pedestal, warm editorial interior/);
   assert.match(result.httpBody.text, /Results will appear/);
   assert.match(result.httpBody.text, /🧪 Test mode · Free - no Luma calls or generation charges\./);
-  assert.match(result.httpBody.text, /3 demo candidates · 4:5 portrait · \$0\.00 charged/);
+  assert.match(result.httpBody.text, /3 demo candidates · 4:5 Portrait · \$0\.00 charged/);
   assert.match(JSON.stringify(result.httpBody.blocks), /✨ Generating SS-001/);
   assert.match(JSON.stringify(result.httpBody.blocks), /Creative direction/);
   assert.match(JSON.stringify(result.httpBody.blocks), /Test mode · Free/);

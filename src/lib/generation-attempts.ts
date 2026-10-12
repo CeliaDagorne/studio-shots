@@ -5,7 +5,7 @@ import {
   displayCandidateIndexInAttempt,
   generationAttemptNumber,
 } from "@/lib/review";
-import { MVP_ASPECT_RATIO } from "@/lib/request-planning";
+import { UNKNOWN_ASPECT_RATIO } from "@/lib/output-format";
 
 export const LEGACY_GENERATION_LABEL = "Legacy generation";
 
@@ -190,7 +190,7 @@ export const planAttemptBackfillForRequest = (
       isLegacy: true,
       label: LEGACY_GENERATION_LABEL,
       shotIdea: params.shotIdea,
-      aspectRatio: MVP_ASPECT_RATIO,
+      aspectRatio: UNKNOWN_ASPECT_RATIO,
       environment,
       status: deriveStatusFromCandidates(sorted),
       errorMessage,
@@ -242,7 +242,7 @@ export const planAttemptBackfillForRequest = (
       isLegacy: false,
       label: formatGenerationAttemptLabel({ attemptNumber, isLegacy: false }),
       shotIdea: params.shotIdea,
-      aspectRatio: MVP_ASPECT_RATIO,
+      aspectRatio: UNKNOWN_ASPECT_RATIO,
       environment,
       status: deriveStatusFromCandidates(sorted),
       errorMessage,

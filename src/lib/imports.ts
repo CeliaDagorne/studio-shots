@@ -11,6 +11,7 @@ import {
   parseImportWarningsPayload,
   serializeImportWarningsPayload,
 } from "@/lib/import-meta";
+import { parseOutputAspectRatio } from "@/lib/output-format";
 import { filterActionableOptionsByStatus } from "@/lib/product-selection";
 import {
   classifyRequestChange,
@@ -296,6 +297,7 @@ export const buildImportPlan = async (
       additionalEstimatedCostMicrosUsd: summary.additionalEstimatedCostMicrosUsd,
       warnings: serializeImportWarningsPayload(warnings, actionableProducts, catalogProducts),
       priorityRequestSku: summary.priorityRequestSku,
+      outputAspectRatio: "4:5",
       platform: conversation.platform,
       conversationId: conversation.conversationId,
       externalEventId,
@@ -326,6 +328,7 @@ export const persistImportPlan = async (plan: ImportPersistPlan): Promise<void> 
         additional_estimated_cost_micros_usd,
         warnings,
         priority_request_sku,
+        output_aspect_ratio,
         platform,
         conversation_id,
         external_event_id
@@ -343,6 +346,7 @@ export const persistImportPlan = async (plan: ImportPersistPlan): Promise<void> 
         ${row.additionalEstimatedCostMicrosUsd},
         ${JSON.stringify(row.warnings)}::jsonb,
         ${row.priorityRequestSku},
+        ${row.outputAspectRatio ?? "4:5"},
         ${row.platform},
         ${row.conversationId},
         ${row.externalEventId}
@@ -648,6 +652,7 @@ export const importRecordToSummary = (
     actionableProducts: payload.actionable,
     priorityRequestSku: record.priorityRequestSku,
     priorityRequestPriority: priorityOption?.priority ?? null,
+    outputAspectRatio: parseOutputAspectRatio(record.outputAspectRatio),
   };
 };
 

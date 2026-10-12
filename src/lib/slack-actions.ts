@@ -12,6 +12,13 @@ import {
 import { notifyConversation } from "@/lib/generation-delivery";
 import { isFakeImageGenerationProvider } from "@/lib/image-generation";
 import {
+  OUTPUT_FORMAT_INVALID_MESSAGE,
+  OUTPUT_FORMAT_STALE_MESSAGE,
+  setImportOutputAspectRatio as setImportOutputAspectRatioDefault,
+  withImportOutputFormatLock as withImportOutputFormatLockDefault,
+  type SetImportOutputAspectRatioResult,
+} from "@/lib/import-output-format";
+import {
   getImportById,
   importRecordToSummary,
   listActionableProductsForImport,
@@ -39,15 +46,19 @@ import {
   buildSlackProductPickerBlocks,
   buildSlackProductPickerLoadingBlocks,
   finalizeSlackCandidateMessageBlocks,
+  isSlackFormatActionId,
   isSlackGenActionId,
   isSlackPageActionId,
+  parseSlackFormatValue,
   parseSlackGenValue,
   parseSlackPageValue,
   SLACK_ACTION_IDS,
+  validateSlackCandidateBlocks,
   type SlackBlock,
 } from "@/lib/slack-blocks";
 import { claimSlackEventId, releaseSlackEventId } from "@/lib/slack-dedupe";
-import type { ActionableProductOption } from "@/types";
+import { resolveSlackImageUrl } from "@/lib/slack-image-url";
+import type { ActionableProductOption, RequestPlanSummary } from "@/types";
 
 const postSlackResponseUrl = async (
   responseUrl: string,
@@ -151,6 +162,13 @@ export type SlackActionDeps = {
   isAllowedTeam?: (teamId: string) => boolean;
   isAllowedChannel?: (channelId: string) => boolean;
   isFakeGeneration?: () => boolean;
+  setImportOutputAspectRatio?: (params: {
+    importId: string;
+    ratio: string;
+  }) => Promise<SetImportOutputAspectRatioResult>;
+  withImportOutputFormatLock?: (
+    summary: RequestPlanSummary,
+  ) => Promise<RequestPlanSummary>;
 };
 
 export const SLACK_INTERACTION_MESSAGES = {
@@ -218,6 +236,10 @@ export const handleSlackBlockAction = async (
   const allowTeam = deps.isAllowedTeam ?? isAllowedSlackTeam;
   const allowChannel = deps.isAllowedChannel ?? isAllowedSlackChannel;
   const isFakeGeneration = deps.isFakeGeneration ?? isFakeImageGenerationProvider;
+  const setOutputAspectRatio =
+    deps.setImportOutputAspectRatio ?? setImportOutputAspectRatioDefault;
+  const withFormatLock =
+    deps.withImportOutputFormatLock ?? withImportOutputFormatLockDefault;
 
   const postResponseUrlBestEffort = async (
     responseUrl: string | undefined,
@@ -319,7 +341,7 @@ export const handleSlackBlockAction = async (
 
     const actionable = await loadStillActionable(loaded.record);
     if (actionable.length === 0) {
-      const summary = importRecordToSummary(loaded.record);
+      const summary = await withFormatLock(importRecordToSummary(loaded.record));
       const campaignPageUrl = campaignUrlFor(loaded.record.id);
       const previewOptions = { campaignPageUrl, testMode: isFakeGeneration() };
       await publishPickerMessage({
@@ -376,7 +398,7 @@ export const handleSlackBlockAction = async (
     if (!loaded.ok) {
       return { httpBody: ephemeral(loaded.message) };
     }
-    const summary = importRecordToSummary(loaded.record);
+    const summary = await withFormatLock(importRecordToSummary(loaded.record));
     const campaignPageUrl = campaignUrlFor(loaded.record.id);
     const previewOptions = { campaignPageUrl, testMode: isFakeGeneration() };
     return {
@@ -400,12 +422,55 @@ export const handleSlackBlockAction = async (
     return beginProductPicker(parsed.importId, parsed.page, payload.response_url);
   }
 
+  if (isSlackFormatActionId(action.action_id)) {
+    const parsed = parseSlackFormatValue(action.value);
+    if (!parsed) {
+      return { httpBody: ephemeral(OUTPUT_FORMAT_INVALID_MESSAGE) };
+    }
+
+    const loaded = await loadAuthorizedImport(parsed.importId);
+    if (!loaded.ok) {
+      return { httpBody: ephemeral(loaded.message) };
+    }
+
+    const result = await setOutputAspectRatio({
+      importId: parsed.importId,
+      ratio: parsed.ratio,
+    });
+
+    if (!result.ok) {
+      if (result.reason === "locked") {
+        return { httpBody: ephemeral(OUTPUT_FORMAT_STALE_MESSAGE) };
+      }
+      if (result.reason === "invalid") {
+        return { httpBody: ephemeral(OUTPUT_FORMAT_INVALID_MESSAGE) };
+      }
+      return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.staleImport) };
+    }
+
+    const refreshed = await getImport(parsed.importId);
+    if (!refreshed) {
+      return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.staleImport) };
+    }
+
+    const summary = await withFormatLock(importRecordToSummary(refreshed));
+    const campaignPageUrl = campaignUrlFor(refreshed.id);
+    const previewOptions = { campaignPageUrl, testMode: isFakeGeneration() };
+    return {
+      httpBody: {
+        replace_original: true,
+        text: buildSlackImportPreviewFallbackText(summary, previewOptions),
+        blocks: buildSlackImportPreviewBlocks(summary, previewOptions),
+      },
+    };
+  }
+
   if (action.action_id === SLACK_ACTION_IDS.back) {
     const loaded = await loadAuthorizedImport(action.value);
     if (!loaded.ok) {
       return { httpBody: ephemeral(loaded.message) };
     }
-    const summary = importRecordToSummary(loaded.record);
+    const summary = await withFormatLock(importRecordToSummary(loaded.record));
     const campaignPageUrl = campaignUrlFor(loaded.record.id);
     const previewOptions = { campaignPageUrl, testMode: isFakeGeneration() };
     return {
@@ -438,6 +503,7 @@ export const handleSlackBlockAction = async (
       sku: prioritySku,
       shotIdea: priorityRequest?.shotIdea ?? null,
       testMode: isFakeGeneration(),
+      outputAspectRatio: loaded.record.outputAspectRatio,
     };
 
     return {
@@ -495,6 +561,7 @@ export const handleSlackBlockAction = async (
       sku: evaluation.option.sku,
       shotIdea: request?.shotIdea ?? null,
       testMode: isFakeGeneration(),
+      outputAspectRatio: loaded.record.outputAspectRatio,
     };
 
     return {
@@ -588,9 +655,10 @@ export const handleSlackBlockAction = async (
           ) => {
             if (!row.blobUrl) return;
             const displayIndex = displayCandidateIndexInAttempt(row.candidateIndex);
+            const slackImageUrl = resolveSlackImageUrl(row.blobUrl, env.appUrl);
             const built = buildSlackCandidateBlocks({
               caption: "",
-              blobUrl: row.blobUrl,
+              blobUrl: slackImageUrl ?? row.blobUrl,
               candidateId: row.id,
               sku: row.productSku,
               candidateIndex: displayIndex,
@@ -598,10 +666,21 @@ export const handleSlackBlockAction = async (
               reviewDecision,
               testMode: isFakeGeneration(),
             });
+            const blockProblems = validateSlackCandidateBlocks(built.blocks);
+            const blocks =
+              blockProblems.length === 0
+                ? built.blocks
+                : built.blocks.filter((block) => block.type !== "image");
+            if (blockProblems.length > 0) {
+              console.error(
+                "[slack/review] candidate image_url not Slack-accessible; updating without image",
+                blockProblems,
+              );
+            }
             const replacement: SlackInteractionResponse = {
               replace_original: true,
               text: built.text,
-              blocks: built.blocks,
+              blocks,
             };
 
             // Prefer chat.update — response_url frequently 404s after the HTTP ack
@@ -613,7 +692,7 @@ export const handleSlackBlockAction = async (
                   channel: channelId,
                   ts,
                   text: built.text,
-                  blocks: built.blocks,
+                  blocks,
                 });
                 return;
               } catch (error) {

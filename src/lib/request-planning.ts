@@ -128,7 +128,7 @@ export const buildImportPreviewText = (
     `- Planned generations: ${summary.plannedGenerations}`,
     `- Additional estimated cost (all ready products): ${formatUsdMicros(summary.additionalEstimatedCostMicrosUsd)}`,
     `- Estimated cost per product: ${formatUsdMicros(estimatedCostMicrosForOneProduct())} (3 candidates)`,
-    `- Aspect ratio: ${MVP_ASPECT_RATIO}`,
+    `- Aspect ratio: ${summary.outputAspectRatio}`,
     formatPriorityRequestPreviewLine(summary),
     "",
     "Catalog-level warnings:",
@@ -179,6 +179,8 @@ export const requestPlanFromCounts = (params: {
   priorityRequestSku: string | null;
   priorityRequestPriority: CatalogPriority | null;
   importId: string;
+  outputAspectRatio?: RequestPlanSummary["outputAspectRatio"];
+  outputAspectRatioLocked?: boolean;
 }): RequestPlanSummary => {
   const requestsReadyToGenerate =
     params.newRequests + params.changedRequests + params.existingPendingRequests;
@@ -189,5 +191,7 @@ export const requestPlanFromCounts = (params: {
     plannedGenerations: requestsReadyToGenerate * CANDIDATES_PER_REQUEST,
     additionalEstimatedCostMicrosUsd:
       requestsReadyToGenerate * CANDIDATES_PER_REQUEST * IMAGE_REF_COST_USD_MICROS,
+    outputAspectRatio: params.outputAspectRatio ?? "4:5",
+    outputAspectRatioLocked: params.outputAspectRatioLocked,
   };
 };

@@ -38,6 +38,7 @@ const sampleSummary = (): RequestPlanSummary => ({
   ],
   priorityRequestSku: "SS-001",
   priorityRequestPriority: "high",
+  outputAspectRatio: "4:5",
 });
 
 test("isSlackImportIntent detects import after a bot mention", async () => {

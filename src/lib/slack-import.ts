@@ -216,12 +216,14 @@ export const runSlackCatalogImport = async (params: {
     const campaignPageUrl = buildCampaignPageUrl(appUrl, summary.importId);
     const isFake =
       params.deps.isFakeGeneration ?? isFakeImageGenerationProvider;
+    // Fresh imports never have generation attempts yet — format stays selectable.
+    const previewSummary = { ...summary, outputAspectRatioLocked: false };
     const previewOptions = {
       campaignPageUrl,
       testMode: isFake(),
     };
-    const text = buildSlackImportPreviewFallbackText(summary, previewOptions);
-    const blocks = buildSlackImportPreviewBlocks(summary, previewOptions);
+    const text = buildSlackImportPreviewFallbackText(previewSummary, previewOptions);
+    const blocks = buildSlackImportPreviewBlocks(previewSummary, previewOptions);
     await params.deps.postMessage({
       channel: params.channel,
       text,

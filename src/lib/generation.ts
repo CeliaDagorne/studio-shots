@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
-import { resolvePublicAssetUrl } from "@/lib/assets";
 import {
   isPollingTimeoutError,
   runCandidateImagePipeline,
 } from "@/lib/candidate-pipeline";
+import { resolveStableLumaSourceUrl } from "@/lib/luma-source";
 import { buildCampaignPageUrl } from "@/lib/campaigns";
 import {
   type ChatConversation,
@@ -21,9 +21,17 @@ import {
 } from "@/lib/generation-attempts";
 import { deliverCandidateImage, notifyConversation } from "@/lib/generation-delivery";
 import { parseImportWarningsPayload } from "@/lib/import-meta";
+import {
+  getImportOutputAspectRatio,
+  resolveAspectRatioForShotRequest,
+} from "@/lib/import-output-format";
 import { getImageGenerationProvider } from "@/lib/image-generation-provider";
 import { isFakeImageGenerationProvider } from "@/lib/image-generation";
 import { buildImageEditPrompt } from "@/lib/luma";
+import {
+  DEFAULT_OUTPUT_ASPECT_RATIO,
+  type OutputAspectRatio,
+} from "@/lib/output-format";
 import {
   buildProductPageUrl,
   formatApprovalCompletionMessage,
@@ -42,7 +50,6 @@ import {
   candidateCaption,
   resolveRequestAfterReviews,
 } from "@/lib/review";
-import { MVP_ASPECT_RATIO } from "@/lib/request-planning";
 import {
   generationAttempts,
   generationCandidates,
@@ -588,6 +595,8 @@ const deliverReadyCandidates = async (params: {
   }>;
   /** When true, only candidates missing an external message id are posted. */
   onlyUndelivered?: boolean;
+  /** Campaign output ratio — used for delivery mismatch warnings only. */
+  expectedAspectRatio?: OutputAspectRatio;
 }): Promise<{ delivered: number; failed: number }> => {
   const db = getDb();
   let delivered = 0;
@@ -610,6 +619,7 @@ const deliverReadyCandidates = async (params: {
         candidateId: candidate.id,
         sku: candidate.productSku,
         candidateIndex: displayIndex,
+        expectedAspectRatio: params.expectedAspectRatio,
       });
       if (result.externalMessageId) {
         await db
@@ -725,10 +735,12 @@ export const redeliverReadyCandidates = async (params: {
     return { ok: false, delivered: 0, reason: "no_ready_candidates" };
   }
 
+  const expectedAspectRatio = await resolveAspectRatioForShotRequest(params.shotRequestId);
   const result = await deliverReadyCandidates({
     conversation: params.conversation,
     candidates: ready,
     onlyUndelivered: true,
+    expectedAspectRatio,
   });
 
   if (request.workflowStatus !== WORKFLOW.awaitingReview) {
@@ -782,6 +794,10 @@ export const runShotRequestGeneration = async (params: {
       shotIdea: claimedRequest.shotIdea,
     });
 
+    const outputAspectRatio: OutputAspectRatio = claimedRequest.importId
+      ? await getImportOutputAspectRatio(claimedRequest.importId)
+      : DEFAULT_OUTPUT_ASPECT_RATIO;
+
     const existing = await db
       .select()
       .from(generationCandidates)
@@ -831,6 +847,7 @@ export const runShotRequestGeneration = async (params: {
             conversation: params.conversation,
             candidates: recoveredReady,
             onlyUndelivered: true,
+            expectedAspectRatio: outputAspectRatio,
           });
           await markRequestStatus(shotRequestId, WORKFLOW.awaitingReview);
           if (delivery.failed > 0) {
@@ -857,6 +874,7 @@ export const runShotRequestGeneration = async (params: {
         const delivery = await deliverReadyCandidates({
           conversation: params.conversation,
           candidates: recoveredReady,
+          expectedAspectRatio: outputAspectRatio,
         });
         await markRequestStatus(shotRequestId, WORKFLOW.awaitingReview);
         if (delivery.failed > 0) {
@@ -912,7 +930,7 @@ export const runShotRequestGeneration = async (params: {
         attemptNumber,
         isLegacy: false,
         shotIdea: claimedRequest.shotIdea,
-        aspectRatio: MVP_ASPECT_RATIO,
+        aspectRatio: outputAspectRatio,
         environment,
         status: "generating",
         createdAt: attemptCreatedAt,
@@ -958,13 +976,28 @@ export const runShotRequestGeneration = async (params: {
       );
     }
 
+    // Normalize onto the campaign canvas and materialize to Blob for both fake and Luma.
+    // Catalog photo_url on the product row is left unchanged for the website.
+    const photoUrlForGeneration = await resolveStableLumaSourceUrl({
+      catalogPhotoUrl: product.photoUrl,
+      appUrl: env.appUrl,
+      sku: claimedRequest.productSku,
+      aspectRatio: outputAspectRatio,
+    });
+    logGeneration("source_normalized", logCtx, {
+      catalogPhotoUrl: product.photoUrl,
+      aspectRatio: outputAspectRatio,
+      sourceHost: new URL(photoUrlForGeneration).host,
+      provider: isFakeImageGenerationProvider() ? "fake" : "luma",
+    });
+
     await Promise.all(
       candidateRows.map((row) =>
         processOneCandidate({
           candidateId: row.id,
           candidateIndex: row.candidateIndex,
           productSku: row.productSku,
-          photoUrl: resolvePublicAssetUrl(product.photoUrl, env.appUrl),
+          photoUrl: photoUrlForGeneration,
           prompt,
           requestId: shotRequestId,
           attemptId: attemptRowId,
@@ -1057,6 +1090,7 @@ export const runShotRequestGeneration = async (params: {
     const delivery = await deliverReadyCandidates({
       conversation: params.conversation,
       candidates: ready,
+      expectedAspectRatio: outputAspectRatio,
     });
 
     await markRequestStatus(shotRequestId, WORKFLOW.awaitingReview);
