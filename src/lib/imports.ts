@@ -122,6 +122,7 @@ export const buildImportPlan = async (
   filename: string,
   conversation: ChatConversation,
   externalEventId: string,
+  options?: { outputAspectRatio?: "4:5" | "1:1" | "3:2" },
 ): Promise<ImportPersistPlan> => {
   const db = getDb();
   const importId = stableImportId(conversation.platform, externalEventId);
@@ -297,7 +298,7 @@ export const buildImportPlan = async (
       additionalEstimatedCostMicrosUsd: summary.additionalEstimatedCostMicrosUsd,
       warnings: serializeImportWarningsPayload(warnings, actionableProducts, catalogProducts),
       priorityRequestSku: summary.priorityRequestSku,
-      outputAspectRatio: "4:5",
+      outputAspectRatio: options?.outputAspectRatio ?? "4:5",
       platform: conversation.platform,
       conversationId: conversation.conversationId,
       externalEventId,
@@ -305,7 +306,10 @@ export const buildImportPlan = async (
     productInserts,
     productUpdates,
     shotRequestInserts,
-    summary,
+    summary: {
+      ...summary,
+      outputAspectRatio: options?.outputAspectRatio ?? "4:5",
+    },
   };
 };
 
@@ -457,6 +461,7 @@ export const upsertCatalogAndPlanImport = async (
   filename: string,
   conversation: ChatConversation,
   externalEventId: string,
+  options?: { outputAspectRatio?: "4:5" | "1:1" | "3:2" },
 ): Promise<ImportResult> => {
   const existing = await findImportByExternalEvent(
     conversation.platform,
@@ -470,7 +475,13 @@ export const upsertCatalogAndPlanImport = async (
     };
   }
 
-  const plan = await buildImportPlan(rows, filename, conversation, externalEventId);
+  const plan = await buildImportPlan(
+    rows,
+    filename,
+    conversation,
+    externalEventId,
+    options,
+  );
 
   try {
     await persistImportPlan(plan);

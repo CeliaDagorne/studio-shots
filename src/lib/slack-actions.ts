@@ -34,7 +34,21 @@ import {
 } from "@/lib/product-selection";
 import { CANDIDATE_STATUS, PRIORITY_CANDIDATE_COUNT, REVIEW_DECISION, WORKFLOW, displayCandidateIndexInAttempt } from "@/lib/review";
 import type { GenerationCandidateRow, ImportRow, ShotRequestRow } from "@/lib/schema";
-import { isAllowedSlackChannel, isAllowedSlackTeam, updateSlackMessage } from "@/lib/slack";
+import {
+  isAllowedSlackChannel,
+  isAllowedSlackTeam,
+  openSlackModal,
+  postSlackMessage,
+  updateSlackMessage,
+} from "@/lib/slack";
+import {
+  buildQuickShotModalView,
+  parseQuickShotModalSubmission,
+  parseQuickShotSetupValue,
+  SLACK_QUICK_SHOT_CALLBACK_ID,
+  SLACK_QUICK_SHOT_MESSAGES,
+  submitSlackQuickShot,
+} from "@/lib/slack-quick-shot";
 import {
   buildSlackCancelledPreviewBlocks,
   buildSlackCandidateBlocks,
@@ -111,6 +125,11 @@ export type SlackBlockAction = {
   action_ts?: string;
 };
 
+export type SlackViewStateValues = Record<
+  string,
+  Record<string, { value?: string; selected_option?: { value?: string } }>
+>;
+
 export type SlackInteractionPayload = {
   type: string;
   trigger_id?: string;
@@ -124,6 +143,12 @@ export type SlackInteractionPayload = {
   };
   response_url?: string;
   actions?: SlackBlockAction[];
+  view?: {
+    id?: string;
+    callback_id?: string;
+    private_metadata?: string;
+    state?: { values?: SlackViewStateValues };
+  };
 };
 
 export type SlackInteractionResponse = {
@@ -137,6 +162,8 @@ export type SlackInteractionResponse = {
 export type SlackInteractionHandleResult = {
   httpBody: SlackInteractionResponse;
   background?: () => Promise<void>;
+  /** For view_submission: keep the modal open with these block_id → message errors. */
+  viewErrors?: Record<string, string>;
 };
 
 export type SlackActionDeps = {
@@ -169,6 +196,9 @@ export type SlackActionDeps = {
   withImportOutputFormatLock?: (
     summary: RequestPlanSummary,
   ) => Promise<RequestPlanSummary>;
+  openModal?: typeof openSlackModal;
+  postMessage?: typeof postSlackMessage;
+  submitQuickShot?: typeof submitSlackQuickShot;
 };
 
 export const SLACK_INTERACTION_MESSAGES = {
@@ -240,6 +270,9 @@ export const handleSlackBlockAction = async (
     deps.setImportOutputAspectRatio ?? setImportOutputAspectRatioDefault;
   const withFormatLock =
     deps.withImportOutputFormatLock ?? withImportOutputFormatLockDefault;
+  const openModal = deps.openModal ?? openSlackModal;
+  const postMessage = deps.postMessage ?? postSlackMessage;
+  const submitQuickShot = deps.submitQuickShot ?? submitSlackQuickShot;
 
   const postResponseUrlBestEffort = async (
     responseUrl: string | undefined,
@@ -261,12 +294,76 @@ export const handleSlackBlockAction = async (
   };
 
   const teamId = payload.team?.id;
-  const channelId = payload.channel?.id;
   const action = payload.actions?.[0];
 
   if (!teamId || !allowTeam(teamId)) {
     return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.unauthorizedWorkspace) };
   }
+
+  /**
+   * Quick Shot modal submit — validate sync; campaign work runs in background.
+   * Channel comes from private_metadata (view payloads often omit channel).
+   */
+  if (payload.type === "view_submission") {
+    if (payload.view?.callback_id !== SLACK_QUICK_SHOT_CALLBACK_ID) {
+      return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.unknownAction) };
+    }
+    const setup = parseQuickShotSetupValue(payload.view.private_metadata);
+    if (!setup || !allowChannel(setup.channelId)) {
+      return {
+        httpBody: {
+          text: "",
+          // Close modal; user gets channel guidance from a follow-up post if needed.
+        },
+        background: async () => {
+          if (setup?.channelId && allowChannel(setup.channelId)) {
+            await postMessage({
+              channel: setup.channelId,
+              text: SLACK_QUICK_SHOT_MESSAGES.staleSetup,
+            });
+          }
+        },
+      };
+    }
+
+    const parsed = parseQuickShotModalSubmission(payload.view.state?.values ?? {});
+    if (!parsed.ok) {
+      return {
+        httpBody: { text: "" },
+        viewErrors: parsed.errors,
+      };
+    }
+
+    const dedupeKey = `slack-view:${payload.view.id ?? setup.eventId}:${setup.eventId}`;
+    if (!claimAction(dedupeKey)) {
+      return {
+        httpBody: { text: "" },
+        background: async () => {
+          await postMessage({
+            channel: setup.channelId,
+            text: SLACK_QUICK_SHOT_MESSAGES.alreadyProcessed,
+          });
+        },
+      };
+    }
+
+    return {
+      httpBody: { text: "" },
+      background: async () => {
+        try {
+          await submitQuickShot({
+            setup,
+            fields: parsed.fields,
+            deps: { postMessage, appUrl },
+          });
+        } finally {
+          releaseAction(dedupeKey);
+        }
+      },
+    };
+  }
+
+  const channelId = payload.channel?.id;
   if (!channelId || !allowChannel(channelId)) {
     return { httpBody: ephemeral(SLACK_INTERACTION_MESSAGES.unauthorizedChannel) };
   }
@@ -408,6 +505,32 @@ export const handleSlackBlockAction = async (
         blocks: buildSlackCancelledPreviewBlocks(summary, previewOptions),
       },
     };
+  }
+
+  if (action.action_id === SLACK_ACTION_IDS.quickShotSetup) {
+    const setup = parseQuickShotSetupValue(action.value);
+    if (!setup || setup.channelId !== channelId) {
+      return { httpBody: ephemeral(SLACK_QUICK_SHOT_MESSAGES.staleSetup) };
+    }
+    const triggerId = payload.trigger_id;
+    if (!triggerId) {
+      return { httpBody: ephemeral(SLACK_QUICK_SHOT_MESSAGES.staleSetup) };
+    }
+    try {
+      await openModal({
+        triggerId,
+        view: buildQuickShotModalView(action.value),
+      });
+      return {
+        httpBody: ephemeral("Quick Shot setup opened. Fill in SKU, creative direction, and format."),
+      };
+    } catch (error) {
+      console.error(
+        "[slack/quick-shot]",
+        error instanceof Error ? error.message : "views.open failed",
+      );
+      return { httpBody: ephemeral(SLACK_QUICK_SHOT_MESSAGES.staleSetup) };
+    }
   }
 
   if (action.action_id === SLACK_ACTION_IDS.choose) {

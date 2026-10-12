@@ -428,7 +428,10 @@ test("Slack help message has no placeholder campaign URL and keeps instructions 
 
   assert.doesNotMatch(help, /campaigns\/<importId>/);
   assert.doesNotMatch(help, /https:\/\/studio-shots\.example\/campaigns\//);
-  assert.match(help, /After import, Studio Shots shares a link to the campaign overview\./);
+  assert.match(help, /After setup, Studio Shots shares a link to the campaign overview\./);
+  assert.match(help, /Quick Shot/);
+  assert.match(help, /`create`/);
+  assert.match(help, /`import`/);
 
   const lines = help.split("\n");
   assert.ok(lines.includes("• Attach one CSV and mention @Studio Shots with `import`"));
@@ -439,7 +442,8 @@ test("Slack help message has no placeholder campaign URL and keeps instructions 
   );
   assert.ok(lines.includes("• Approve or Reject each generated shot in this channel"));
   assert.ok(lines.includes("• Public product pages for approved shots"));
+  assert.ok(lines.includes("• Attach one product image and mention @Studio Shots with `create`"));
   assert.ok(
-    lines.includes("• After import, Studio Shots shares a link to the campaign overview."),
+    lines.includes("• After setup, Studio Shots shares a link to the campaign overview."),
   );
 });

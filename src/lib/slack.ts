@@ -21,6 +21,10 @@ import {
   SLACK_IMPORT_MESSAGES,
   type SlackFileAttachment,
 } from "@/lib/slack-import";
+import {
+  isSlackCreateIntent,
+  runSlackQuickShotMention,
+} from "@/lib/slack-quick-shot";
 
 export type SlackUrlVerification = {
   type: "url_verification";
@@ -78,7 +82,11 @@ export const slackHelpMessage = (_appUrl?: string): string =>
   [
     "*Studio Shots* · styled product photography for catalog teams.",
     "",
-    "*Import a catalog in this channel:*",
+    "*Quick Shot (one product):*",
+    "• Attach one product image and mention @Studio Shots with `create`",
+    "• Set SKU, creative direction, and format, then Generate when ready",
+    "",
+    "*CSV catalog import:*",
     "• Attach one CSV and mention @Studio Shots with `import`",
     "• Review the preview, then generate the priority product or choose another SKU",
     "",
@@ -87,7 +95,7 @@ export const slackHelpMessage = (_appUrl?: string): string =>
     "",
     "*Team visibility:*",
     "• Public product pages for approved shots",
-    "• After import, Studio Shots shares a link to the campaign overview.",
+    "• After setup, Studio Shots shares a link to the campaign overview.",
   ].join("\n");
 
 export const slackHelpBlocks = (appUrl?: string): SlackBlock[] => [
@@ -101,10 +109,10 @@ export const slackHelpBlocks = (appUrl?: string): SlackBlock[] => [
 ];
 
 export const SLACK_UNKNOWN_COMMAND_MESSAGE =
-  "I don't recognize that command. Try `help`, `import`, `next`, `next up`, `continue`, or `status`.";
+  "I don't recognize that command. Try `help`, `create`, `import`, `next`, `next up`, `continue`, or `status`.";
 
 export const SLACK_NO_CAMPAIGN_MESSAGE =
-  "No campaign found in this channel yet. Attach a catalog CSV and mention @Studio Shots with `import`.";
+  "No campaign found in this channel yet. Attach a product image with `create`, or a catalog CSV with `import`.";
 
 const CAMPAIGN_STATUS_COMMANDS = new Set(["next", "next up", "continue", "status"]);
 
@@ -209,6 +217,32 @@ const postSlackChatUpdate = async (body: {
   }
 
   return (await response.json()) as SlackApiResult;
+};
+
+/** Open a Slack modal using a fresh interaction trigger_id. */
+export const openSlackModal = async (params: {
+  triggerId: string;
+  view: Record<string, unknown>;
+}): Promise<void> => {
+  const response = await fetch("https://slack.com/api/views.open", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${env.slackBotToken}`,
+      "content-type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify({
+      trigger_id: params.triggerId,
+      view: params.view,
+    }),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(`Slack views.open HTTP ${response.status}`);
+  }
+  const json = (await response.json()) as { ok: boolean; error?: string };
+  if (!json.ok) {
+    throw new Error(`Slack views.open failed: ${json.error ?? "unknown_error"}`);
+  }
 };
 
 /**
@@ -351,6 +385,21 @@ export const processSlackEventCallback = async (
       text: SLACK_IMPORT_MESSAGES.unauthorizedChannel,
     });
     return { handled: false, reason: "unauthorized_channel" };
+  }
+
+  if (isSlackCreateIntent(mention.text)) {
+    const result = await runSlackQuickShotMention({
+      channel,
+      externalEventId: payload.event_id,
+      files: mention.files,
+      deps: {
+        postMessage,
+      },
+    });
+    return {
+      handled: result.ok,
+      reason: result.reason ?? "quick_shot",
+    };
   }
 
   if (isSlackImportIntent(mention.text)) {

@@ -100,6 +100,8 @@ export const SLACK_ACTION_IDS = {
   back: "ss_imp_back",
   /** Set campaign output aspect ratio before the first generation. */
   format: "ss_imp_format",
+  /** Open the Quick Shot setup modal after an image + `create` mention. */
+  quickShotSetup: "ss_qs_setup",
   /** Retry generation after failure or regenerate under-threshold reviews. */
   retry: "ss_req_retry",
   /** Re-deliver existing ready candidates without creating a new generation. */
@@ -206,6 +208,151 @@ const formatUpNextSection = (summary: RequestPlanSummary): string => {
   }
   const priority = summary.priorityRequestPriority ?? "normal";
   return `🎯 *Up next*\n*${summary.priorityRequestSku}* · ${priority} priority`;
+};
+
+export const buildSlackQuickShotSetupBlocks = (params: {
+  setupValue: string;
+}): { text: string; blocks: SlackBlock[] } => {
+  const text =
+    "Quick Shot · Set up this product photo. Click the button to enter SKU, creative direction, and output format.";
+  return {
+    text,
+    blocks: [
+      {
+        type: "header",
+        text: { type: "plain_text", text: "⚡ Quick Shot", emoji: true },
+      },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: "I received your product photo. Click *Set up quick shot* to enter the SKU, creative direction, and output format. Nothing is generated until you confirm.",
+        },
+      },
+      {
+        type: "actions",
+        block_id: "ss_qs_setup_actions",
+        elements: [
+          button({
+            actionId: SLACK_ACTION_IDS.quickShotSetup,
+            text: "Set up quick shot",
+            value: params.setupValue.slice(0, 2000),
+            style: "primary",
+          }),
+        ],
+      },
+    ],
+  };
+};
+
+export const buildSlackQuickShotPreviewBlocks = (params: {
+  summary: RequestPlanSummary;
+  sku: string;
+  shotIdea: string;
+  sourceImageUrl: string;
+  campaignPageUrl?: string | null;
+  testMode?: boolean;
+}): { text: string; blocks: SlackBlock[]; summary: RequestPlanSummary } => {
+  const testMode = Boolean(params.testMode);
+  const ratio = parseOutputAspectRatio(params.summary.outputAspectRatio);
+  const costLabel = testMode
+    ? "$0.00 charged"
+    : formatOneProductCostLabel();
+  const generateLabel = testMode
+    ? `Generate test candidates: ${params.sku}`
+    : `Generate: ${params.sku} · ${formatOneProductCostLabel()}`;
+
+  const blocks: SlackBlock[] = [
+    {
+      type: "header",
+      text: { type: "plain_text", text: "⚡ Quick Shot ready", emoji: true },
+    },
+  ];
+
+  if (testMode) {
+    blocks.push(testModeContextBlock());
+  }
+
+  if (isSlackAccessibleImageUrl(params.sourceImageUrl)) {
+    blocks.push({
+      type: "image",
+      image_url: params.sourceImageUrl,
+      alt_text: truncateSlackText(`${params.sku} source photo`, 2000),
+    });
+  }
+
+  blocks.push(
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: truncateSlackText(
+          `*${escapeSlackMrkdwn(params.sku)}*\n*Creative direction*\n_${escapeSlackMrkdwn(params.shotIdea)}_`,
+          3000,
+        ),
+      },
+    },
+    {
+      type: "section",
+      fields: [
+        field("Planned output", `${CANDIDATES_PER_REQUEST} candidates`),
+        field("Estimated cost", costLabel),
+        field("Format", outputAspectRatioLabel(ratio)),
+        field("Priority", "normal"),
+      ],
+    },
+    {
+      type: "actions",
+      block_id: `ss_qs_preview:${params.summary.importId}`,
+      elements: [
+        button({
+          actionId: SLACK_ACTION_IDS.priority,
+          text: generateLabel,
+          value: encodeSlackImportValue(params.summary.importId),
+          style: "primary",
+        }),
+        ...(params.campaignPageUrl
+          ? [
+              button({
+                text: "Campaign overview",
+                url: params.campaignPageUrl,
+              }),
+            ]
+          : []),
+        button({
+          actionId: SLACK_ACTION_IDS.cancel,
+          text: "Cancel",
+          value: encodeSlackImportValue(params.summary.importId),
+        }),
+      ],
+    },
+  );
+
+  return { text: buildSlackQuickShotPreviewFallbackText(params), blocks, summary: params.summary };
+};
+
+export const buildSlackQuickShotPreviewFallbackText = (params: {
+  summary: RequestPlanSummary;
+  sku: string;
+  shotIdea: string;
+  campaignPageUrl?: string | null;
+  testMode?: boolean;
+}): string => {
+  const ratio = parseOutputAspectRatio(params.summary.outputAspectRatio);
+  const costLabel = params.testMode ? "$0.00 charged" : formatOneProductCostLabel();
+  const lines = [
+    "⚡ Quick Shot ready",
+    "",
+    `SKU: ${params.sku}`,
+    `Creative direction: ${params.shotIdea}`,
+    `Format: ${outputAspectRatioLabel(ratio)}`,
+    `Planned: ${CANDIDATES_PER_REQUEST} candidates · ${costLabel}`,
+  ];
+  if (params.campaignPageUrl) {
+    lines.push(`Campaign overview: ${params.campaignPageUrl}`);
+  }
+  lines.push("", "Nothing is generated until you click Generate.");
+  return lines.join("\n");
 };
 
 const formatImportDetailsContextLine = (summary: RequestPlanSummary): string =>
