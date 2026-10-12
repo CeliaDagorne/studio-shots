@@ -114,5 +114,6 @@ test("runCandidateImagePipeline records failure without storing when generation 
   assert.equal(result.status, "failed");
   if (result.status === "failed") {
     assert.equal(result.errorMessage, "content_moderated");
+    assert.equal(result.lumaGenerationId, "luma-gen-fail");
   }
 });

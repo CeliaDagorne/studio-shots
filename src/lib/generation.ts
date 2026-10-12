@@ -2,7 +2,10 @@ import { createHash } from "node:crypto";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import { resolvePublicAssetUrl } from "@/lib/assets";
-import { runCandidateImagePipeline } from "@/lib/candidate-pipeline";
+import {
+  isPollingTimeoutError,
+  runCandidateImagePipeline,
+} from "@/lib/candidate-pipeline";
 import { buildCampaignPageUrl } from "@/lib/campaigns";
 import {
   type ChatConversation,
@@ -314,6 +317,41 @@ const ensureRequestLeavesGenerating = async (shotRequestId: string, fallbackStat
     );
 };
 
+export const STILL_PROCESSING_USER_MESSAGE =
+  "Still processing — no new generation was started.";
+
+/** Short poll used on Retry to check existing jobs without waiting a full generation window. */
+const RECONCILE_POLL_OPTIONS = {
+  timeoutMs: 4_000,
+  initialWaitMs: 0,
+  pollIntervalMs: 1_000,
+} as const;
+
+export type ReconcileExternalResult = {
+  recovered: number;
+  stillProcessing: number;
+  explicitlyFailed: number;
+};
+
+/**
+ * Decide whether Retry may start a new paid attempt after reconciling external IDs.
+ * - wait: at least one job is still running
+ * - deliver: no runners left and at least one ready candidate exists
+ * - new_attempt: nothing recoverable; Luma reported failure (or no external ids)
+ */
+export const decideAfterExternalReconcile = (params: {
+  stillProcessing: number;
+  readyCount: number;
+}): "wait" | "deliver" | "new_attempt" => {
+  if (params.stillProcessing > 0) {
+    return "wait";
+  }
+  if (params.readyCount > 0) {
+    return "deliver";
+  }
+  return "new_attempt";
+};
+
 const processOneCandidate = async (params: {
   candidateId: string;
   candidateIndex: number;
@@ -322,7 +360,7 @@ const processOneCandidate = async (params: {
   prompt: string;
   requestId: string;
   attemptId: string | null;
-}): Promise<"ready" | "failed"> => {
+}): Promise<"ready" | "failed" | "timed_out"> => {
   const db = getDb();
   const logCtx = {
     requestId: params.requestId,
@@ -370,6 +408,7 @@ const processOneCandidate = async (params: {
         status: CANDIDATE_STATUS.ready,
         blobPath: result.blobPath,
         blobUrl: result.blobUrl,
+        errorMessage: null,
         updatedAt: now(),
       })
       .where(eq(generationCandidates.id, params.candidateId));
@@ -380,10 +419,33 @@ const processOneCandidate = async (params: {
     return "ready";
   }
 
+  if (result.status === "timed_out") {
+    // Keep submitted + external id so Retry can reconcile without a new paid create.
+    await db
+      .update(generationCandidates)
+      .set({
+        lumaGenerationId: result.lumaGenerationId,
+        ...(result.lumaState ? { lumaState: result.lumaState } : {}),
+        status: CANDIDATE_STATUS.submitted,
+        errorMessage: result.errorMessage,
+        updatedAt: now(),
+      })
+      .where(eq(generationCandidates.id, params.candidateId));
+    logGeneration("candidate_poll_timed_out", logCtx, {
+      candidateId: params.candidateId,
+      generationId: result.lumaGenerationId,
+      error: result.errorMessage,
+    });
+    return "timed_out";
+  }
+
+  // Explicit failure: never clear an already-known external id.
   await db
     .update(generationCandidates)
     .set({
-      lumaGenerationId: result.lumaGenerationId ?? null,
+      ...(result.lumaGenerationId
+        ? { lumaGenerationId: result.lumaGenerationId }
+        : {}),
       lumaState: result.lumaState ?? null,
       status: CANDIDATE_STATUS.failed,
       errorMessage: result.errorMessage,
@@ -410,10 +472,12 @@ export const reconcileExternalGenerationIds = async (params: {
     lumaGenerationId: string | null;
     blobUrl: string | null;
   }>;
-}): Promise<number> => {
+}): Promise<ReconcileExternalResult> => {
   const db = getDb();
   const provider = getImageGenerationProvider();
   let recovered = 0;
+  let stillProcessing = 0;
+  let explicitlyFailed = 0;
 
   for (const candidate of params.candidates) {
     if (
@@ -425,17 +489,37 @@ export const reconcileExternalGenerationIds = async (params: {
     }
 
     try {
-      const finished = await provider.pollUntilDone(candidate.lumaGenerationId);
-      if (finished.state !== "completed" || !finished.outputUrl) {
+      const finished = await provider.pollUntilDone(
+        candidate.lumaGenerationId,
+        RECONCILE_POLL_OPTIONS,
+      );
+      if (finished.state === "failed") {
         await db
           .update(generationCandidates)
           .set({
+            lumaGenerationId: candidate.lumaGenerationId,
             lumaState: finished.state,
             status: CANDIDATE_STATUS.failed,
             errorMessage: finished.failureReason ?? "Image generation failed",
             updatedAt: now(),
           })
           .where(eq(generationCandidates.id, candidate.id));
+        explicitlyFailed += 1;
+        continue;
+      }
+
+      if (finished.state !== "completed" || !finished.outputUrl) {
+        await db
+          .update(generationCandidates)
+          .set({
+            lumaGenerationId: candidate.lumaGenerationId,
+            lumaState: finished.state,
+            status: CANDIDATE_STATUS.submitted,
+            errorMessage: `External generation still ${finished.state}`,
+            updatedAt: now(),
+          })
+          .where(eq(generationCandidates.id, candidate.id));
+        stillProcessing += 1;
         continue;
       }
 
@@ -448,6 +532,7 @@ export const reconcileExternalGenerationIds = async (params: {
       await db
         .update(generationCandidates)
         .set({
+          lumaGenerationId: candidate.lumaGenerationId,
           lumaState: finished.state,
           status: CANDIDATE_STATUS.ready,
           blobPath: stored.blobPath,
@@ -458,15 +543,38 @@ export const reconcileExternalGenerationIds = async (params: {
         .where(eq(generationCandidates.id, candidate.id));
       recovered += 1;
     } catch (error) {
-      console.error(
-        "[generation/reconcile]",
-        candidate.id,
-        error instanceof Error ? error.message : "reconcile failed",
-      );
+      const message = error instanceof Error ? error.message : "reconcile failed";
+      console.error("[generation/reconcile]", candidate.id, message);
+
+      if (isPollingTimeoutError(error) || /still/i.test(message)) {
+        await db
+          .update(generationCandidates)
+          .set({
+            lumaGenerationId: candidate.lumaGenerationId,
+            status: CANDIDATE_STATUS.submitted,
+            errorMessage: message,
+            updatedAt: now(),
+          })
+          .where(eq(generationCandidates.id, candidate.id));
+        stillProcessing += 1;
+        continue;
+      }
+
+      // Keep the external id even when reconcile hits an unexpected error.
+      await db
+        .update(generationCandidates)
+        .set({
+          lumaGenerationId: candidate.lumaGenerationId,
+          status: CANDIDATE_STATUS.submitted,
+          errorMessage: message,
+          updatedAt: now(),
+        })
+        .where(eq(generationCandidates.id, candidate.id));
+      stillProcessing += 1;
     }
   }
 
-  return recovered;
+  return { recovered, stillProcessing, explicitlyFailed };
 };
 
 const deliverReadyCandidates = async (params: {
@@ -685,9 +793,9 @@ export const runShotRequestGeneration = async (params: {
     const latestFullyReviewed =
       latestReady.length > 0 && latestReady.every((c) => Boolean(c.reviewDecision));
 
-    // Uncertain prior failure: reconcile stored external IDs before paying again.
+    // Cost-safe Retry: reconcile existing external IDs before any new paid create.
     if (!latestFullyReviewed && latest.some((c) => c.lumaGenerationId)) {
-      await reconcileExternalGenerationIds({ candidates: latest });
+      const reconcile = await reconcileExternalGenerationIds({ candidates: latest });
       const afterReconcile = filterLatestGenerationAttempt(
         await db
           .select()
@@ -698,7 +806,54 @@ export const runShotRequestGeneration = async (params: {
       const recoveredReady = afterReconcile.filter(
         (c) => c.status === CANDIDATE_STATUS.ready && c.blobUrl,
       );
-      if (recoveredReady.length > 0) {
+      const decision = decideAfterExternalReconcile({
+        stillProcessing: reconcile.stillProcessing,
+        readyCount: recoveredReady.length,
+      });
+
+      logGeneration(
+        "reconcile_complete",
+        {
+          requestId: shotRequestId,
+          sku: claimedRequest.productSku,
+        },
+        {
+          recovered: reconcile.recovered,
+          stillProcessing: reconcile.stillProcessing,
+          explicitlyFailed: reconcile.explicitlyFailed,
+          decision,
+        },
+      );
+
+      if (decision === "wait") {
+        if (recoveredReady.length > 0) {
+          const delivery = await deliverReadyCandidates({
+            conversation: params.conversation,
+            candidates: recoveredReady,
+            onlyUndelivered: true,
+          });
+          await markRequestStatus(shotRequestId, WORKFLOW.awaitingReview);
+          if (delivery.failed > 0) {
+            await notifyDeliveryFailed({
+              conversation: params.conversation,
+              sku: claimedRequest.productSku,
+              requestId: shotRequestId,
+              importId: claimedRequest.importId,
+              readyCount: recoveredReady.length,
+            });
+          }
+        } else {
+          // Claimable again after background work; candidates stay submitted with ids.
+          await markRequestStatus(shotRequestId, WORKFLOW.failed);
+        }
+        await notifyConversation(
+          params.conversation,
+          `${claimedRequest.productSku}: ${STILL_PROCESSING_USER_MESSAGE}`,
+        );
+        return { claimed: true };
+      }
+
+      if (decision === "deliver") {
         const delivery = await deliverReadyCandidates({
           conversation: params.conversation,
           candidates: recoveredReady,
@@ -725,6 +880,8 @@ export const runShotRequestGeneration = async (params: {
         }
         return { claimed: true };
       }
+
+      // decision === "new_attempt": fall through only when nothing is recoverable.
     }
 
     const startIndex = nextGenerationAttemptStartIndex(existing);
@@ -835,10 +992,16 @@ export const runShotRequestGeneration = async (params: {
     const failed = attemptCandidates.filter(
       (candidate) => candidate.status === CANDIDATE_STATUS.failed,
     );
+    const unresolved = attemptCandidates.filter(
+      (candidate) =>
+        candidate.status === CANDIDATE_STATUS.submitted &&
+        Boolean(candidate.lumaGenerationId),
+    );
 
     logGeneration("pipeline_complete", logCtx, {
       ready: ready.length,
       failed: failed.length,
+      unresolved: unresolved.length,
     });
 
     const attemptStatus = deriveStatusFromCandidates(attemptCandidates);
@@ -848,7 +1011,8 @@ export const runShotRequestGeneration = async (params: {
           .update(generationAttempts)
           .set({
             status: attemptStatus,
-            errorMessage: failed[0]?.errorMessage ?? null,
+            errorMessage:
+              unresolved[0]?.errorMessage ?? failed[0]?.errorMessage ?? null,
             updatedAt: now(),
           })
           .where(eq(generationAttempts.id, attemptRowId));
@@ -864,6 +1028,17 @@ export const runShotRequestGeneration = async (params: {
 
     if (ready.length === 0) {
       await markRequestStatus(shotRequestId, WORKFLOW.failed);
+      if (unresolved.length > 0) {
+        logGeneration("generation_unresolved_timeout", logCtx, {
+          unresolved: unresolved.length,
+          firstError: unresolved[0]?.errorMessage ?? null,
+        });
+        await notifyConversation(
+          params.conversation,
+          `${claimedRequest.productSku}: ${STILL_PROCESSING_USER_MESSAGE} Use Retry to check existing jobs without starting a new paid generation.`,
+        );
+        return { claimed: true };
+      }
       logGeneration("generation_failed_no_ready", logCtx, {
         firstError: failed[0]?.errorMessage ?? null,
       });
@@ -908,7 +1083,12 @@ export const runShotRequestGeneration = async (params: {
     });
 
     try {
-      if (failed.length > 0) {
+      if (unresolved.length > 0) {
+        await notifyConversation(
+          params.conversation,
+          `${claimedRequest.productSku}: ${ready.length} candidate(s) ready for review, ${unresolved.length} still processing. Review the ready photos; use Retry later to recover the rest without a new paid generation.`,
+        );
+      } else if (failed.length > 0) {
         await notifyConversation(
           params.conversation,
           `${claimedRequest.productSku}: ${ready.length} candidate(s) ready for review, ${failed.length} failed. Review the photos above; the request will resolve after every available candidate is approved or rejected.`,

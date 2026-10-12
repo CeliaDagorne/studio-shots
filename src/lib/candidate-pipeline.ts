@@ -9,11 +9,24 @@ export type CandidatePipelineResult =
       blobUrl: string;
     }
   | {
+      /** Luma (or provider) reported a terminal failure. */
       status: "failed";
       lumaGenerationId?: string;
       lumaState?: string;
       errorMessage: string;
+    }
+  | {
+      /** Polling deadline hit; the external job may still be running. */
+      status: "timed_out";
+      lumaGenerationId: string;
+      lumaState?: string;
+      errorMessage: string;
     };
+
+export const isPollingTimeoutError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  return /timed out after \d+ms/i.test(message);
+};
 
 /** Pure create → poll → store flow via the active image-generation provider. */
 export const runCandidateImagePipeline = async (
@@ -26,6 +39,8 @@ export const runCandidateImagePipeline = async (
     prompt: string;
   },
 ): Promise<CandidatePipelineResult> => {
+  let createdId: string | null = null;
+
   try {
     const created = await provider.createGeneration({
       prompt: params.prompt,
@@ -33,6 +48,7 @@ export const runCandidateImagePipeline = async (
       candidateId: params.candidateId,
       candidateIndex: params.candidateIndex,
     });
+    createdId = created.id;
 
     const finished = await provider.pollUntilDone(created.id);
     if (finished.state !== "completed" || !finished.outputUrl) {
@@ -58,9 +74,21 @@ export const runCandidateImagePipeline = async (
       blobUrl: stored.blobUrl,
     };
   } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown candidate failure";
+
+    if (createdId && isPollingTimeoutError(error)) {
+      return {
+        status: "timed_out",
+        lumaGenerationId: createdId,
+        errorMessage,
+      };
+    }
+
     return {
       status: "failed",
-      errorMessage: error instanceof Error ? error.message : "Unknown candidate failure",
+      ...(createdId ? { lumaGenerationId: createdId } : {}),
+      errorMessage,
     };
   }
 };

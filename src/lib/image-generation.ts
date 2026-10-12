@@ -22,10 +22,19 @@ export type StoreCandidateImageParams = {
  * Provider contract for paid Luma generation and the local/preview fake path.
  * Fake implementations must never construct a Luma client or call Luma endpoints.
  */
+export type PollGenerationOptions = {
+  timeoutMs?: number;
+  initialWaitMs?: number;
+  pollIntervalMs?: number;
+};
+
 export type ImageGenerationProvider = {
   readonly name: ImageGenerationProviderName;
   createGeneration: (params: CreateGenerationParams) => Promise<ImageGenerationSnapshot>;
-  pollUntilDone: (generationId: string) => Promise<ImageGenerationSnapshot>;
+  pollUntilDone: (
+    generationId: string,
+    options?: PollGenerationOptions,
+  ) => Promise<ImageGenerationSnapshot>;
   storeCandidateImage: (
     params: StoreCandidateImageParams,
   ) => Promise<{ blobPath: string; blobUrl: string }>;
