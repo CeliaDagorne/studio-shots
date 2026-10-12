@@ -144,7 +144,7 @@ test("Slack generation-started shows test-mode context for fake provider", async
     }),
   );
   assert.match(blocks, new RegExp(SLACK_FAKE_GENERATION_CONTEXT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(blocks, /demo candidates/);
+  assert.match(blocks, /⏳ Creating 3 candidates for SS-001/);
   assert.match(blocks, /\$0\.00 charged/);
   assert.match(
     buildSlackGenerationStartedFallbackText({

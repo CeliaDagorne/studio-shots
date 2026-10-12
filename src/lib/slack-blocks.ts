@@ -787,66 +787,85 @@ export const buildSlackCancelledPreviewBlocks = (
 
 export type GenerationStartedMessageParams = {
   sku: string;
+  /** Kept for callers; no longer shown on the progress message. */
   shotIdea?: string | null;
   testMode?: boolean;
   outputAspectRatio?: OutputAspectRatio | string;
 };
 
-const normalizeShotIdea = (shotIdea: string | null | undefined): string | null => {
-  if (typeof shotIdea !== "string") {
-    return null;
-  }
-  const trimmed = shotIdea.trim();
-  return trimmed.length > 0 ? trimmed : null;
+export type SlackGenerationProgressCounts = {
+  ready: number;
+  total?: number;
+  stillProcessing?: number;
 };
 
-const generationStartedSummaryLine = (
+const generationCostLabel = (testMode: boolean): string =>
+  testMode ? "$0.00 charged" : formatOneProductCostLabel();
+
+const generationFormatCostLine = (
   testMode: boolean,
   ratio: OutputAspectRatio,
-): string => {
-  const format = outputAspectRatioLabel(ratio);
-  if (testMode) {
-    return `${CANDIDATES_PER_REQUEST} demo candidates · ${format} · $0.00 charged`;
-  }
-  return `${CANDIDATES_PER_REQUEST} lifestyle candidates · ${format} · ${formatOneProductCostLabel()}`;
-};
+): string => `${outputAspectRatioLabel(ratio)} · ${generationCostLabel(testMode)}`;
 
-const generationStartedSummaryMrkdwn = (
+const generationFormatCostMrkdwn = (
   testMode: boolean,
   ratio: OutputAspectRatio,
-): string => {
-  const format = outputAspectRatioLabel(ratio);
-  if (testMode) {
-    return `*${CANDIDATES_PER_REQUEST} demo candidates* · *${format}* · *$0.00 charged*`;
-  }
-  return `*${CANDIDATES_PER_REQUEST} lifestyle candidates* · *${format}* · *${formatOneProductCostLabel()}*`;
-};
+): string =>
+  `*${outputAspectRatioLabel(ratio)}* · *${generationCostLabel(testMode)}*`;
 
-const generationStartedSupportLine = (testMode: boolean): string =>
-  testMode
-    ? "Creating free demo candidates (not Luma images). Results will appear here when ready."
-    : "Using the catalog product photo as the source. Results will appear here when ready.";
+const GENERATION_PROGRESS_SUPPORT_LINES = [
+  "Usually ready in 1–3 minutes.",
+  "You can leave this channel — results will appear here.",
+] as const;
+
+/** Concise Slack-facing failure copy — never echo provider IDs or internals. */
+export const userFacingGenerationFailureReason = (
+  detail?: string | null,
+): string => {
+  const raw = typeof detail === "string" ? detail.trim() : "";
+  if (!raw) {
+    return "Candidates could not be created. Retry this product, or choose another.";
+  }
+  const lower = raw.toLowerCase();
+  if (
+    lower.includes("still processing") ||
+    lower.includes("timed out") ||
+    lower.includes("timeout") ||
+    lower.includes("unresolved")
+  ) {
+    return "Generation is still processing. Retry later to check progress without starting a new generation.";
+  }
+  if (
+    lower.includes("photo") ||
+    lower.includes("source") ||
+    lower.includes("normalize") ||
+    lower.includes("blob") ||
+    lower.includes("image")
+  ) {
+    return "Could not prepare the product photo. Check the source image, then retry.";
+  }
+  return "Candidates could not be created. Retry this product, or choose another.";
+};
 
 export const buildSlackGenerationStartedFallbackText = (
   params: GenerationStartedMessageParams | string,
 ): string => {
-  const { sku, shotIdea, testMode, outputAspectRatio } =
+  const { sku, testMode, outputAspectRatio } =
     typeof params === "string"
-      ? { sku: params, shotIdea: null, testMode: false, outputAspectRatio: undefined }
+      ? { sku: params, testMode: false, outputAspectRatio: undefined }
       : { testMode: false, ...params };
   const ratio = parseOutputAspectRatio(outputAspectRatio);
-  const idea = normalizeShotIdea(shotIdea);
-  const lines = [`✨ Generating ${sku}`, ""];
+  const lines = [
+    `⏳ Creating ${CANDIDATES_PER_REQUEST} candidates for ${sku}`,
+    "",
+  ];
   if (testMode) {
     lines.push(SLACK_FAKE_GENERATION_CONTEXT, "");
   }
-  if (idea) {
-    lines.push("Creative direction", idea, "");
-  }
   lines.push(
-    generationStartedSummaryLine(Boolean(testMode), ratio),
+    generationFormatCostLine(Boolean(testMode), ratio),
     "",
-    generationStartedSupportLine(Boolean(testMode)),
+    ...GENERATION_PROGRESS_SUPPORT_LINES,
   );
   return lines.join("\n");
 };
@@ -854,18 +873,20 @@ export const buildSlackGenerationStartedFallbackText = (
 export const buildSlackGenerationStartedBlocks = (
   params: GenerationStartedMessageParams | string,
 ): SlackBlock[] => {
-  const { sku, shotIdea, testMode, outputAspectRatio } =
+  const { sku, testMode, outputAspectRatio } =
     typeof params === "string"
-      ? { sku: params, shotIdea: null, testMode: false, outputAspectRatio: undefined }
+      ? { sku: params, testMode: false, outputAspectRatio: undefined }
       : { testMode: false, ...params };
   const ratio = parseOutputAspectRatio(outputAspectRatio);
-  const idea = normalizeShotIdea(shotIdea);
   const blocks: SlackBlock[] = [
     {
       type: "header",
       text: {
         type: "plain_text",
-        text: truncateSlackText(`✨ Generating ${sku}`, 150),
+        text: truncateSlackText(
+          `⏳ Creating ${CANDIDATES_PER_REQUEST} candidates for ${sku}`,
+          150,
+        ),
         emoji: true,
       },
     },
@@ -875,26 +896,13 @@ export const buildSlackGenerationStartedBlocks = (
     blocks.push(testModeContextBlock());
   }
 
-  if (idea) {
-    blocks.push({
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: truncateSlackText(
-          `*Creative direction*\n_${escapeSlackMrkdwn(idea)}_`,
-          3000,
-        ),
-      },
-    });
-  }
-
   blocks.push(
     {
       type: "section",
       text: {
         type: "mrkdwn",
         text: truncateSlackText(
-          generationStartedSummaryMrkdwn(Boolean(testMode), ratio),
+          generationFormatCostMrkdwn(Boolean(testMode), ratio),
           3000,
         ),
       },
@@ -904,13 +912,171 @@ export const buildSlackGenerationStartedBlocks = (
       elements: [
         {
           type: "mrkdwn",
-          text: truncateSlackText(generationStartedSupportLine(Boolean(testMode)), 3000),
+          text: truncateSlackText(GENERATION_PROGRESS_SUPPORT_LINES.join("\n"), 3000),
         },
       ],
     },
   );
 
   return blocks;
+};
+
+const progressTotal = (params: SlackGenerationProgressCounts): number =>
+  params.total ?? CANDIDATES_PER_REQUEST;
+
+export const buildSlackGenerationProgressPartialFallbackText = (params: {
+  sku: string;
+  ready: number;
+  total?: number;
+  testMode?: boolean;
+  outputAspectRatio?: OutputAspectRatio | string;
+}): string => {
+  const total = progressTotal(params);
+  const ratio = parseOutputAspectRatio(params.outputAspectRatio);
+  const lines = [`🎨 ${params.ready} of ${total} candidates ready`, ""];
+  if (params.testMode) {
+    lines.push(SLACK_FAKE_GENERATION_CONTEXT, "");
+  }
+  lines.push(generationFormatCostLine(Boolean(params.testMode), ratio));
+  return lines.join("\n");
+};
+
+export const buildSlackGenerationProgressPartialBlocks = (params: {
+  sku: string;
+  ready: number;
+  total?: number;
+  testMode?: boolean;
+  outputAspectRatio?: OutputAspectRatio | string;
+}): { text: string; blocks: SlackBlock[] } => {
+  const total = progressTotal(params);
+  const ratio = parseOutputAspectRatio(params.outputAspectRatio);
+  const text = buildSlackGenerationProgressPartialFallbackText(params);
+  const blocks: SlackBlock[] = [
+    {
+      type: "header",
+      text: {
+        type: "plain_text",
+        text: truncateSlackText(`🎨 ${params.ready} of ${total} candidates ready`, 150),
+        emoji: true,
+      },
+    },
+  ];
+  if (params.testMode) {
+    blocks.push(testModeContextBlock());
+  }
+  blocks.push({
+    type: "section",
+    text: {
+      type: "mrkdwn",
+      text: truncateSlackText(
+        generationFormatCostMrkdwn(Boolean(params.testMode), ratio),
+        3000,
+      ),
+    },
+  });
+  return { text, blocks };
+};
+
+export const buildSlackGenerationProgressCompleteFallbackText = (params: {
+  sku: string;
+  ready: number;
+  total?: number;
+  testMode?: boolean;
+}): string => {
+  const total = progressTotal(params);
+  const headline =
+    params.ready >= total
+      ? `✅ ${total} candidates ready — review them below`
+      : `✅ ${params.ready} of ${total} candidates ready — review them below`;
+  const lines = [headline];
+  if (params.testMode) {
+    lines.push("", SLACK_FAKE_GENERATION_CONTEXT);
+  }
+  return lines.join("\n");
+};
+
+export const buildSlackGenerationProgressCompleteBlocks = (params: {
+  sku: string;
+  ready: number;
+  total?: number;
+  testMode?: boolean;
+}): { text: string; blocks: SlackBlock[] } => {
+  const total = progressTotal(params);
+  const text = buildSlackGenerationProgressCompleteFallbackText(params);
+  const headline =
+    params.ready >= total
+      ? `✅ ${total} candidates ready — review them below`
+      : `✅ ${params.ready} of ${total} candidates ready — review them below`;
+  const blocks: SlackBlock[] = [
+    {
+      type: "header",
+      text: {
+        type: "plain_text",
+        text: truncateSlackText(headline, 150),
+        emoji: true,
+      },
+    },
+  ];
+  if (params.testMode) {
+    blocks.push(testModeContextBlock());
+  }
+  return { text, blocks };
+};
+
+export const buildSlackGenerationProgressTimeoutFallbackText = (params: {
+  sku: string;
+  ready: number;
+  stillProcessing: number;
+  total?: number;
+  testMode?: boolean;
+}): string => {
+  const total = progressTotal(params);
+  const lines = [
+    `⏳ ${params.ready} of ${total} ready · ${params.stillProcessing} still processing`,
+    "",
+    "No new generation was started.",
+  ];
+  if (params.testMode) {
+    lines.splice(1, 0, "", SLACK_FAKE_GENERATION_CONTEXT);
+  }
+  return lines.join("\n");
+};
+
+export const buildSlackGenerationProgressTimeoutBlocks = (params: {
+  sku: string;
+  ready: number;
+  stillProcessing: number;
+  total?: number;
+  testMode?: boolean;
+}): { text: string; blocks: SlackBlock[] } => {
+  const total = progressTotal(params);
+  const text = buildSlackGenerationProgressTimeoutFallbackText(params);
+  const blocks: SlackBlock[] = [
+    {
+      type: "header",
+      text: {
+        type: "plain_text",
+        text: truncateSlackText(
+          `⏳ ${params.ready} of ${total} ready · ${params.stillProcessing} still processing`,
+          150,
+        ),
+        emoji: true,
+      },
+    },
+  ];
+  if (params.testMode) {
+    blocks.push(testModeContextBlock());
+  }
+  blocks.push({
+    type: "context",
+    elements: [
+      {
+        type: "mrkdwn",
+        text: "No new generation was started.",
+      },
+    ],
+  });
+  return { text, blocks };
 };
 
 export const buildSlackCandidatesReadyFallbackText = (params: {
@@ -1372,8 +1538,10 @@ export const buildSlackGenerationFailedFallbackText = (params: {
   sku: string;
   campaignPageUrl?: string | null;
   testMode?: boolean;
+  detail?: string | null;
 }): string => {
-  const lines = [`⚠️ Generation failed for ${params.sku}`];
+  const reason = userFacingGenerationFailureReason(params.detail);
+  const lines = [`⚠️ Generation failed for ${params.sku}`, "", reason];
   if (params.testMode) {
     lines.push("", SLACK_FAKE_GENERATION_CONTEXT);
   }
@@ -1390,8 +1558,10 @@ export const buildSlackGenerationFailedBlocks = (params: {
   requestId: string;
   campaignPageUrl?: string | null;
   testMode?: boolean;
+  detail?: string | null;
 }): { text: string; blocks: SlackBlock[] } => {
   const text = buildSlackGenerationFailedFallbackText(params);
+  const reason = userFacingGenerationFailureReason(params.detail);
   const elements = [
     button({
       actionId: SLACK_ACTION_IDS.retry,
@@ -1427,11 +1597,20 @@ export const buildSlackGenerationFailedBlocks = (params: {
   if (params.testMode) {
     blocks.push(testModeContextBlock());
   }
-  blocks.push({
-    type: "actions",
-    block_id: `ss_gen_failed:${params.requestId}`,
-    elements,
-  });
+  blocks.push(
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: truncateSlackText(escapeSlackMrkdwn(reason), 3000),
+      },
+    },
+    {
+      type: "actions",
+      block_id: `ss_gen_failed:${params.requestId}`,
+      elements,
+    },
+  );
 
   return { text, blocks };
 };

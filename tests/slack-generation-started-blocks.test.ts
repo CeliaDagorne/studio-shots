@@ -43,7 +43,7 @@ test("fake-mode generation-started Block Kit payload is structurally valid", asy
   const headerText = (blocks[0] as { text: { type: string; text: string; emoji?: boolean } }).text;
   assert.equal(headerText.type, "plain_text");
   assert.equal(headerText.emoji, true);
-  assert.match(headerText.text, /✨ Generating SS-001/);
+  assert.match(headerText.text, /⏳ Creating 3 candidates for SS-001/);
   assert.ok(headerText.text.length <= 150);
 
   assert.equal(blocks[1]?.type, "context");
@@ -54,23 +54,16 @@ test("fake-mode generation-started Block Kit payload is structurally valid", asy
   assert.equal(contextElements[0]?.text, SLACK_FAKE_GENERATION_CONTEXT);
 
   assert.equal(blocks[2]?.type, "section");
-  const ideaSection = (blocks[2] as { text: { type: string; text: string } }).text;
-  assertValidTextObject(ideaSection, "creativeDirection");
-  assert.equal(ideaSection.type, "mrkdwn");
-  assert.match(ideaSection.text, /\*Creative direction\*/);
-  assert.ok(ideaSection.text.includes("travel \\*day\\* energy\\_test"));
-  assert.doesNotMatch(ideaSection.text, /_travel \*day\* energy_test_/);
-
-  assert.equal(blocks[3]?.type, "section");
-  const summary = (blocks[3] as { text: { type: string; text: string } }).text;
+  const summary = (blocks[2] as { text: { type: string; text: string } }).text;
   assertValidTextObject(summary, "summary");
-  assert.match(summary.text, /\*3 demo candidates\*/);
+  assert.match(summary.text, /\*4:5 Portrait\*/);
   assert.match(summary.text, /\$0\.00 charged/);
 
-  assert.equal(blocks[4]?.type, "context");
-  const support = (blocks[4] as { elements: Array<{ type: string; text: string }> }).elements[0];
+  assert.equal(blocks[3]?.type, "context");
+  const support = (blocks[3] as { elements: Array<{ type: string; text: string }> }).elements[0];
   assert.equal(support?.type, "mrkdwn");
-  assert.match(support?.text ?? "", /Creating free demo candidates/);
+  assert.match(support?.text ?? "", /Usually ready in 1–3 minutes/);
+  assert.match(support?.text ?? "", /You can leave this channel/);
 
   for (const block of blocks) {
     assert.notEqual(block.type, "actions");
@@ -94,10 +87,9 @@ test("fake-mode generation-started Block Kit payload is structurally valid", asy
     testMode: true,
   });
   assert.match(fallback, /Test mode · Free/);
-  assert.match(fallback, /Creative direction/);
-  assert.match(fallback, /hotel lobby bench/);
-  assert.match(fallback, /\$0\.00 charged/);
-  assert.doesNotMatch(fallback, /—/); // ascii hyphen only
+  assert.match(fallback, /4:5 Portrait · \$0\.00 charged/);
+  assert.match(fallback, /Usually ready in 1–3 minutes/);
+  assert.doesNotMatch(fallback, /Creative direction/);
 });
 
 test("postSlackMessage falls back to plain text after invalid_blocks without retrying generation", async () => {

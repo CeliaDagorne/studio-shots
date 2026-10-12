@@ -639,6 +639,9 @@ export const handleSlackBlockAction = async (
         await runPriority({
           importId: loaded.record.id,
           conversation,
+          slackProgressMessage: payload.message?.ts
+            ? { channel: channelId, ts: payload.message.ts }
+            : null,
         });
       },
     };
@@ -697,6 +700,9 @@ export const handleSlackBlockAction = async (
         await runSelected({
           shotRequestId: evaluation.option.requestId,
           conversation,
+          slackProgressMessage: payload.message?.ts
+            ? { channel: channelId, ts: payload.message.ts }
+            : null,
         });
       },
     };

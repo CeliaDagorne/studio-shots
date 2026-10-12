@@ -63,6 +63,11 @@ import {
   buildSlackGenerationFailedBlocks,
 } from "@/lib/slack-blocks";
 import {
+  createSlackGenerationProgressUpdater,
+  type SlackGenerationProgressTarget,
+  type SlackGenerationProgressUpdater,
+} from "@/lib/slack-generation-progress";
+import {
   editMessageCaption,
   removeInlineKeyboard,
   sendMessage,
@@ -659,15 +664,26 @@ const notifyGenerationFailed = async (params: {
   requestId: string;
   importId: string | null;
   detail?: string;
+  progress?: SlackGenerationProgressUpdater | null;
 }) => {
   if (params.conversation.platform === CHAT_PLATFORM.slack && params.importId) {
     const campaignPageUrl = buildCampaignPageUrl(env.appUrl, params.importId);
+    if (params.progress) {
+      await params.progress.onFailed({
+        importId: params.importId,
+        requestId: params.requestId,
+        detail: params.detail,
+        campaignPageUrl,
+      });
+      return;
+    }
     const built = buildSlackGenerationFailedBlocks({
       sku: params.sku,
       importId: params.importId,
       requestId: params.requestId,
       campaignPageUrl,
       testMode: isFakeImageGenerationProvider(),
+      detail: params.detail,
     });
     await notifyConversation(params.conversation, built.text, { blocks: built.blocks });
     return;
@@ -675,7 +691,7 @@ const notifyGenerationFailed = async (params: {
 
   await notifyConversation(
     params.conversation,
-    `⚠️ Generation failed for ${params.sku}${params.detail ? `: ${params.detail}` : ""}`,
+    `⚠️ Generation failed for ${params.sku}`,
   );
 };
 
@@ -764,6 +780,8 @@ export const runShotRequestGeneration = async (params: {
   shotRequestId: string;
   conversation: ChatConversation;
   label?: string;
+  /** Existing Slack progress message to chat.update (never posts noisy duplicates). */
+  slackProgressMessage?: SlackGenerationProgressTarget | null;
 }): Promise<{ claimed: boolean }> => {
   const claimedRequest = await claimShotRequestForGeneration(params.shotRequestId);
 
@@ -777,6 +795,7 @@ export const runShotRequestGeneration = async (params: {
 
   const shotRequestId = claimedRequest.id;
   const label = params.label ?? claimedRequest.productSku;
+  let progress: SlackGenerationProgressUpdater | null = null;
 
   try {
     const db = getDb();
@@ -797,6 +816,19 @@ export const runShotRequestGeneration = async (params: {
     const outputAspectRatio: OutputAspectRatio = claimedRequest.importId
       ? await getImportOutputAspectRatio(claimedRequest.importId)
       : DEFAULT_OUTPUT_ASPECT_RATIO;
+
+    progress =
+      params.conversation.platform === CHAT_PLATFORM.slack &&
+      params.slackProgressMessage?.channel &&
+      params.slackProgressMessage?.ts
+        ? createSlackGenerationProgressUpdater({
+            target: params.slackProgressMessage,
+            sku: claimedRequest.productSku,
+            total: PRIORITY_CANDIDATE_COUNT,
+            testMode: isFakeImageGenerationProvider(),
+            outputAspectRatio,
+          })
+        : null;
 
     const existing = await db
       .select()
@@ -863,10 +895,17 @@ export const runShotRequestGeneration = async (params: {
           // Claimable again after background work; candidates stay submitted with ids.
           await markRequestStatus(shotRequestId, WORKFLOW.failed);
         }
-        await notifyConversation(
-          params.conversation,
-          `${claimedRequest.productSku}: ${STILL_PROCESSING_USER_MESSAGE}`,
-        );
+        if (progress) {
+          await progress.onTimeout({
+            ready: recoveredReady.length,
+            stillProcessing: reconcile.stillProcessing,
+          });
+        } else {
+          await notifyConversation(
+            params.conversation,
+            `${claimedRequest.productSku}: ${STILL_PROCESSING_USER_MESSAGE}`,
+          );
+        }
         return { claimed: true };
       }
 
@@ -885,6 +924,8 @@ export const runShotRequestGeneration = async (params: {
             importId: claimedRequest.importId,
             readyCount: recoveredReady.length,
           });
+        } else if (progress) {
+          await progress.onComplete(recoveredReady.length);
         } else if (params.conversation.platform === CHAT_PLATFORM.slack) {
           const readyMessage = buildSlackCandidatesReadyBlocks({
             sku: claimedRequest.productSku,
@@ -991,9 +1032,27 @@ export const runShotRequestGeneration = async (params: {
       provider: isFakeImageGenerationProvider() ? "fake" : "luma",
     });
 
+    let settledReadyCount = 0;
+    let progressGate: Promise<void> = Promise.resolve();
+    const noteCandidateReady = () => {
+      progressGate = progressGate.then(async () => {
+        settledReadyCount += 1;
+        if (progress) {
+          await progress.onReadyCount(settledReadyCount);
+        }
+      });
+      // Keep the chain alive even when a progress update fails.
+      progressGate = progressGate.catch((error) => {
+        console.error(
+          "[slack/generation-progress]",
+          error instanceof Error ? error.message : "progress update failed",
+        );
+      });
+    };
+
     await Promise.all(
-      candidateRows.map((row) =>
-        processOneCandidate({
+      candidateRows.map(async (row) => {
+        const outcome = await processOneCandidate({
           candidateId: row.id,
           candidateIndex: row.candidateIndex,
           productSku: row.productSku,
@@ -1001,9 +1060,14 @@ export const runShotRequestGeneration = async (params: {
           prompt,
           requestId: shotRequestId,
           attemptId: attemptRowId,
-        }),
-      ),
+        });
+        if (outcome === "ready") {
+          noteCandidateReady();
+        }
+        return outcome;
+      }),
     );
+    await progressGate;
 
     const attemptCandidates = await db
       .select()
@@ -1066,10 +1130,17 @@ export const runShotRequestGeneration = async (params: {
           unresolved: unresolved.length,
           firstError: unresolved[0]?.errorMessage ?? null,
         });
-        await notifyConversation(
-          params.conversation,
-          `${claimedRequest.productSku}: ${STILL_PROCESSING_USER_MESSAGE} Use Retry to check existing jobs without starting a new paid generation.`,
-        );
+        if (progress) {
+          await progress.onTimeout({
+            ready: 0,
+            stillProcessing: unresolved.length,
+          });
+        } else {
+          await notifyConversation(
+            params.conversation,
+            `${claimedRequest.productSku}: ${STILL_PROCESSING_USER_MESSAGE} Use Retry to check existing jobs without starting a new paid generation.`,
+          );
+        }
         return { claimed: true };
       }
       logGeneration("generation_failed_no_ready", logCtx, {
@@ -1083,6 +1154,7 @@ export const runShotRequestGeneration = async (params: {
         detail: failed[0]?.errorMessage
           ? `all ${PRIORITY_CANDIDATE_COUNT} candidates failed. First error: ${failed[0].errorMessage}`
           : `all ${PRIORITY_CANDIDATE_COUNT} candidates failed.`,
+        progress,
       });
       return { claimed: true };
     }
@@ -1118,10 +1190,19 @@ export const runShotRequestGeneration = async (params: {
 
     try {
       if (unresolved.length > 0) {
-        await notifyConversation(
-          params.conversation,
-          `${claimedRequest.productSku}: ${ready.length} candidate(s) ready for review, ${unresolved.length} still processing. Review the ready photos; use Retry later to recover the rest without a new paid generation.`,
-        );
+        if (progress) {
+          await progress.onTimeout({
+            ready: ready.length,
+            stillProcessing: unresolved.length,
+          });
+        } else {
+          await notifyConversation(
+            params.conversation,
+            `${claimedRequest.productSku}: ${ready.length} candidate(s) ready for review, ${unresolved.length} still processing. Review the ready photos; use Retry later to recover the rest without a new paid generation.`,
+          );
+        }
+      } else if (progress) {
+        await progress.onComplete(ready.length);
       } else if (failed.length > 0) {
         await notifyConversation(
           params.conversation,
@@ -1188,6 +1269,7 @@ export const runShotRequestGeneration = async (params: {
       requestId: shotRequestId,
       importId: claimedRequest.importId,
       detail: message,
+      progress,
     });
     return { claimed: true };
   }
@@ -1196,6 +1278,7 @@ export const runShotRequestGeneration = async (params: {
 export const runPriorityGeneration = async (params: {
   importId: string;
   conversation: ChatConversation;
+  slackProgressMessage?: SlackGenerationProgressTarget | null;
 }): Promise<void> => {
   const request = await findActionablePriorityRequest(params.importId);
   if (!request) {
@@ -1210,16 +1293,19 @@ export const runPriorityGeneration = async (params: {
     shotRequestId: request.id,
     conversation: params.conversation,
     label: `priority ${request.productSku}`,
+    slackProgressMessage: params.slackProgressMessage,
   });
 };
 
 export const runSelectedRequestGeneration = async (params: {
   shotRequestId: string;
   conversation: ChatConversation;
+  slackProgressMessage?: SlackGenerationProgressTarget | null;
 }): Promise<void> => {
   await runShotRequestGeneration({
     shotRequestId: params.shotRequestId,
     conversation: params.conversation,
+    slackProgressMessage: params.slackProgressMessage,
   });
 };
 

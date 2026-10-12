@@ -156,16 +156,19 @@ test("generation-started messages use the persisted campaign format", async () =
   const summary = blocks.find(
     (block) =>
       block.type === "section" &&
-      String((block as { text?: { text?: string } }).text?.text ?? "").includes("demo candidates"),
+      String((block as { text?: { text?: string } }).text?.text ?? "").includes("3:2 Landscape"),
   ) as { text: { text: string } };
+  assert.ok(summary);
   assert.match(summary.text.text, /3:2 Landscape/);
+  assert.match(summary.text.text, /\$0\.00 charged/);
 
   const fallback = buildSlackGenerationStartedFallbackText({
     sku: "SS-001",
     testMode: true,
     outputAspectRatio: "3:2",
   });
-  assert.match(fallback, /3:2 Landscape/);
+  assert.match(fallback, /⏳ Creating 3 candidates for SS-001/);
+  assert.match(fallback, /3:2 Landscape · \$0\.00 charged/);
 });
 
 test("format mismatch warning is delivered without discarding the image", async () => {

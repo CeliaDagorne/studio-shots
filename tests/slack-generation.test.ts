@@ -246,7 +246,7 @@ test("import preview omits warnings section when empty and shows them when prese
   assert.match(withWarnings, /Source photo may be underexposed/);
 });
 
-test("generation started Block Kit uses creative direction, summary line, and context", async () => {
+test("generation started Block Kit uses creating progress copy", async () => {
   const {
     buildSlackGenerationStartedBlocks,
     buildSlackGenerationStartedFallbackText,
@@ -257,29 +257,26 @@ test("generation started Block Kit uses creative direction, summary line, and co
     testMode: false,
   });
   const withIdeaSerialized = JSON.stringify(withIdea);
-  assert.match(withIdeaSerialized, /✨ Generating SS-001/);
-  assert.match(withIdeaSerialized, /\*Creative direction\*/);
-  assert.match(withIdeaSerialized, /_on a travertine pedestal, warm editorial interior_/);
-  assert.match(
-    withIdeaSerialized,
-    /\*3 lifestyle candidates\* · \*4:5 Portrait\* · \*~\$0\.13\*/,
-  );
-  assert.match(withIdeaSerialized, /Using the catalog product photo as the source/);
-  assert.match(withIdeaSerialized, /Results will appear here when ready/);
+  assert.match(withIdeaSerialized, /⏳ Creating 3 candidates for SS-001/);
+  assert.match(withIdeaSerialized, /\*4:5 Portrait\* · \*~\$0\.13\*/);
+  assert.match(withIdeaSerialized, /Usually ready in 1–3 minutes/);
+  assert.match(withIdeaSerialized, /You can leave this channel/);
+  assert.doesNotMatch(withIdeaSerialized, /Creative direction/);
   assert.doesNotMatch(withIdeaSerialized, /Test mode/);
   assert.doesNotMatch(withIdeaSerialized, /demo candidates/);
   assert.doesNotMatch(withIdeaSerialized, /image_ref/);
   assert.doesNotMatch(withIdeaSerialized, /as reference/);
+  assert.doesNotMatch(withIdeaSerialized, /Luma/);
 
   const fallback = buildSlackGenerationStartedFallbackText({
     sku: "SS-001",
     shotIdea: "on a travertine pedestal, warm editorial interior",
     testMode: false,
   });
-  assert.match(fallback, /Creative direction/);
-  assert.match(fallback, /on a travertine pedestal, warm editorial interior/);
-  assert.match(fallback, /3 lifestyle candidates · 4:5 Portrait · ~\$0\.13/);
-  assert.match(fallback, /Using the catalog product photo as the source/);
+  assert.match(fallback, /⏳ Creating 3 candidates for SS-001/);
+  assert.match(fallback, /4:5 Portrait · ~\$0\.13/);
+  assert.match(fallback, /Usually ready in 1–3 minutes/);
+  assert.doesNotMatch(fallback, /Creative direction/);
   assert.doesNotMatch(fallback, /Test mode/);
   assert.doesNotMatch(fallback, /image_ref/);
   assert.doesNotMatch(fallback, /as reference/);
@@ -288,14 +285,10 @@ test("generation started Block Kit uses creative direction, summary line, and co
     buildSlackGenerationStartedBlocks({ sku: "SS-002", testMode: false }),
   );
   assert.doesNotMatch(withoutIdea, /Creative direction/);
-  assert.match(withoutIdea, /✨ Generating SS-002/);
-  assert.doesNotMatch(
-    buildSlackGenerationStartedFallbackText({ sku: "SS-002", shotIdea: "   " }),
-    /Creative direction/,
-  );
+  assert.match(withoutIdea, /⏳ Creating 3 candidates for SS-002/);
 });
 
-test("fake-mode generation started uses demo wording and free notice", async () => {
+test("fake-mode generation started uses free notice without provider jargon", async () => {
   const {
     buildSlackGenerationStartedBlocks,
     buildSlackGenerationStartedFallbackText,
@@ -312,12 +305,10 @@ test("fake-mode generation started uses demo wording and free notice", async () 
     serialized,
     new RegExp(SLACK_FAKE_GENERATION_CONTEXT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
   );
-  assert.match(serialized, /\*Creative direction\*/);
-  assert.match(
-    serialized,
-    /\*3 demo candidates\* · \*4:5 Portrait\* · \*\$0\.00 charged\*/,
-  );
-  assert.match(serialized, /Creating free demo candidates \(not Luma images\)/);
+  assert.match(serialized, /⏳ Creating 3 candidates for SS-001/);
+  assert.match(serialized, /\*4:5 Portrait\* · \*\$0\.00 charged\*/);
+  assert.match(serialized, /Usually ready in 1–3 minutes/);
+  assert.doesNotMatch(serialized, /Creative direction/);
   assert.doesNotMatch(serialized, /lifestyle candidates/);
   assert.doesNotMatch(serialized, /~\$0\.13/);
 
@@ -327,9 +318,8 @@ test("fake-mode generation started uses demo wording and free notice", async () 
     testMode: true,
   });
   assert.match(fallback, /Test mode · Free/);
-  assert.match(fallback, /3 demo candidates · 4:5 Portrait · \$0\.00 charged/);
-  assert.match(fallback, /Creative direction/);
-  assert.match(fallback, /on a travertine pedestal, warm editorial interior/);
+  assert.match(fallback, /4:5 Portrait · \$0\.00 charged/);
+  assert.doesNotMatch(fallback, /Creative direction/);
 });
 
 test("candidates ready Block Kit summarizes review guidance", async () => {
@@ -522,16 +512,15 @@ test("priority generation action starts the shared generation path", async () =>
     },
   );
 
-  assert.match(result.httpBody.text, /✨ Generating SS-001/);
-  assert.match(result.httpBody.text, /Creative direction/);
-  assert.match(result.httpBody.text, /on a travertine pedestal, warm editorial interior/);
-  assert.match(result.httpBody.text, /Results will appear/);
+  assert.match(result.httpBody.text, /⏳ Creating 3 candidates for SS-001/);
+  assert.match(result.httpBody.text, /Usually ready in 1–3 minutes/);
+  assert.match(result.httpBody.text, /You can leave this channel/);
   assert.match(result.httpBody.text, /🧪 Test mode · Free - no Luma calls or generation charges\./);
-  assert.match(result.httpBody.text, /3 demo candidates · 4:5 Portrait · \$0\.00 charged/);
-  assert.match(JSON.stringify(result.httpBody.blocks), /✨ Generating SS-001/);
-  assert.match(JSON.stringify(result.httpBody.blocks), /Creative direction/);
+  assert.match(result.httpBody.text, /4:5 Portrait · \$0\.00 charged/);
+  assert.match(JSON.stringify(result.httpBody.blocks), /⏳ Creating 3 candidates for SS-001/);
   assert.match(JSON.stringify(result.httpBody.blocks), /Test mode · Free/);
   assert.match(JSON.stringify(result.httpBody.blocks), /\$0\.00 charged/);
+  assert.doesNotMatch(result.httpBody.text, /Creative direction/);
   assert.equal(result.httpBody.replace_original, true);
   await result.background!();
   assert.equal(priorityCalls, 1);
@@ -557,10 +546,9 @@ test("manual SKU selection validates request id and sku server-side", async () =
       },
     },
   );
-  assert.match(ok.httpBody.text, /✨ Generating SS-002/);
-  assert.match(ok.httpBody.text, /evening coffee table, book half-open beside it/);
-  assert.match(JSON.stringify(ok.httpBody.blocks), /✨ Generating SS-002/);
-  assert.match(JSON.stringify(ok.httpBody.blocks), /Creative direction/);
+  assert.match(ok.httpBody.text, /⏳ Creating 3 candidates for SS-002/);
+  assert.match(JSON.stringify(ok.httpBody.blocks), /⏳ Creating 3 candidates for SS-002/);
+  assert.doesNotMatch(ok.httpBody.text, /Creative direction/);
   await ok.background!();
   assert.equal(selectedCalls, 1);
 
@@ -594,7 +582,7 @@ test("duplicate Generate clicks are refused once the request is no longer action
       },
     },
   );
-  assert.match(first.httpBody.text, /✨ Generating SS-002/);
+  assert.match(first.httpBody.text, /⏳ Creating 3 candidates for SS-002/);
   assert.ok(first.background);
   await first.background!();
   assert.equal(selectedCalls, 1);
