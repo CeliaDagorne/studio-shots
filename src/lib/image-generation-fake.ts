@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { resolvePublicAssetUrl } from "@/lib/assets";
 import { candidateBlobPath } from "@/lib/blob";
 import type {
   CreateGenerationParams,
@@ -7,6 +8,7 @@ import type {
   ImageGenerationSnapshot,
   StoreCandidateImageParams,
 } from "@/lib/image-generation";
+import { resolveSlackImageUrl } from "@/lib/slack-image-url";
 
 /**
  * Historical demo packshot paths (one per catalog SKU).
@@ -111,10 +113,20 @@ export const createFakeGenerationProvider = (
       };
     },
     storeCandidateImage: async (params: StoreCandidateImageParams) => {
-      // Skip Vercel Blob in fake mode; Slack/product pages use the source URL.
+      // Skip Vercel Blob in fake mode; persist an absolute URL Slack can fetch
+      // when APP_URL is a public HTTPS origin (e.g. current ngrok tunnel).
+      const absolute = resolvePublicAssetUrl(params.sourceUrl, options.appUrl);
+      const publicUrl = resolveSlackImageUrl(absolute, options.appUrl);
+      if (!publicUrl) {
+        console.error(
+          "[image-generation/fake] candidate image URL is not public HTTPS; " +
+            "set APP_URL to the current public ngrok origin so Slack can download images. " +
+            `resolved=${absolute}`,
+        );
+      }
       return {
         blobPath: candidateBlobPath(params.sku, params.candidateId),
-        blobUrl: params.sourceUrl,
+        blobUrl: publicUrl ?? absolute,
       };
     },
   };
