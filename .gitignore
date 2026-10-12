@@ -22,3 +22,5 @@ google-cloud-cli-*.tar.gz
 # next-agents-md
 .next-docs/
 .cursor/settings.json
+.vercel
+.env*
